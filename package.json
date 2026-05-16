@@ -1,0 +1,16 @@
+[
+  {
+    "id": "DownloadAddedNotify",
+    "name": "下载添加通知",
+    "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
+    "version": "1.0.0",
+    "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png",
+    "author": "Codex",
+    "level": 1,
+    "v2": true,
+    "history": {
+      "v1.0.0": "初始版本：监听 DownloadAdded 事件并调用系统通知"
+    }
+  }
+]
+
