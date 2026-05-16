@@ -1,16 +1,42 @@
 import secrets
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException, Request
-
-from app.core.event import Event, eventmanager
-from app.log import logger
 from app.plugins import _PluginBase
-from app.schemas.types import EventType, NotificationType
+
+try:
+    from fastapi import HTTPException, Request
+except Exception:
+    HTTPException = None
+    Request = Any
+
+try:
+    from app.core.event import eventmanager
+    from app.schemas.types import EventType
+except Exception:
+    eventmanager = None
+    EventType = None
+
+try:
+    from app.log import logger
+except Exception:
+    class _FallbackLogger:
+        @staticmethod
+        def info(*args, **kwargs):
+            pass
+
+        @staticmethod
+        def warn(*args, **kwargs):
+            pass
+
+        @staticmethod
+        def error(*args, **kwargs):
+            pass
+
+    logger = _FallbackLogger()
 
 
 def _register_event(event_type: Any):
-    if event_type is None:
+    if eventmanager is None or event_type is None:
         return lambda func: func
     return eventmanager.register(event_type)
 
@@ -19,7 +45,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.8"
+    plugin_version = "0.0.9"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -83,8 +109,8 @@ class DownloadAddedNotify(_PluginBase):
     def get_state(self) -> bool:
         return self._enabled
 
-    @_register_event(getattr(EventType, "DownloadAdded", None))
-    def download_added(self, event: Event):
+    @_register_event(getattr(EventType, "DownloadAdded", None) if EventType else None)
+    def download_added(self, event):
         if not self._enabled or self._notify_stage not in ("download_added", "both"):
             return
 
@@ -166,8 +192,8 @@ class DownloadAddedNotify(_PluginBase):
         except Exception as err:
             logger.error(f"{self.plugin_name}: 发送下载添加通知失败 - {err}", exc_info=True)
 
-    @_register_event(getattr(EventType, "TransferComplete", None))
-    def transfer_complete(self, event: Event):
+    @_register_event(getattr(EventType, "TransferComplete", None) if EventType else None)
+    def transfer_complete(self, event):
         if not self._enabled or self._notify_stage not in ("transfer_complete", "both"):
             return
 
@@ -336,12 +362,12 @@ class DownloadAddedNotify(_PluginBase):
     async def qbittorrent_notify(self, request: Request) -> Dict[str, Any]:
         payload = await self._request_payload(request)
         if not self._external_notify_enabled:
-            raise HTTPException(status_code=403, detail="external notify is disabled")
+            self._raise_http_error(403, "external notify is disabled")
         notify_token = self._first_value(payload, "token", "notify_token")
         if not self._external_notify_token or not notify_token:
-            raise HTTPException(status_code=401, detail="missing notify token")
+            self._raise_http_error(401, "missing notify token")
         if not secrets.compare_digest(str(notify_token), self._external_notify_token):
-            raise HTTPException(status_code=401, detail="invalid notify token")
+            self._raise_http_error(401, "invalid notify token")
 
         event = self._first_value(payload, "event", "action") or "added"
         title = self._first_value(payload, "name", "title") or "未知任务"
@@ -666,8 +692,23 @@ class DownloadAddedNotify(_PluginBase):
 
     def _notification_type(self):
         if self._notify_type == "Manual":
-            return NotificationType.Manual
-        return NotificationType.Download
+            return self._notification_type_value("Manual")
+        return self._notification_type_value("Download")
+
+    @staticmethod
+    def _notification_type_value(name: str):
+        try:
+            from app.schemas.types import NotificationType
+
+            return getattr(NotificationType, name)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _raise_http_error(status_code: int, detail: str):
+        if HTTPException:
+            raise HTTPException(status_code=status_code, detail=detail)
+        raise Exception(detail)
 
     def _build_qb_command(self, event: str) -> str:
         base_url = (self._moviepilot_base_url or "http://moviepilot:3001").rstrip("/")
