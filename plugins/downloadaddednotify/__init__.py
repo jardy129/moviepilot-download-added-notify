@@ -45,12 +45,12 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.9"
+    plugin_version = "0.0.10"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
     plugin_order = 66
-    auth_level = 1
+    auth_level = 0
 
     _enabled = False
     _notify_type = "Download"
