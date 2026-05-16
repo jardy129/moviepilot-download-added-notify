@@ -5,7 +5,6 @@ from fastapi import HTTPException, Request
 
 from app.core.event import Event, eventmanager
 from app.log import logger
-from app.modules.qbittorrent import QbittorrentModule
 from app.plugins import _PluginBase
 from app.schemas.types import EventType, NotificationType
 
@@ -14,7 +13,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.5"
+    plugin_version = "0.0.6"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -209,6 +208,8 @@ class DownloadAddedNotify(_PluginBase):
             return
 
         try:
+            from app.modules.qbittorrent import QbittorrentModule
+
             qb_module = QbittorrentModule()
             qb_module.init_module()
             instances = qb_module.get_instances()

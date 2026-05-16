@@ -2,12 +2,13 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.0.5",
+    "version": "0.0.6",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png",
     "author": "jardy",
     "level": 1,
     "v2": true,
     "history": {
+      "v0.0.6": "修复 qBittorrent 模块导入兼容性导致配置页为空的问题",
       "v0.0.5": "将 qBittorrent 外部程序通知 Token 纳入插件配置",
       "v0.0.4": "增加 Qbittorrent 外部程序主动通知接口和脚本",
       "v0.0.3": "增加 Qbittorrent 手动添加任务轮询通知",
