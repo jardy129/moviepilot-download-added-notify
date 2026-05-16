@@ -9,11 +9,17 @@ from app.plugins import _PluginBase
 from app.schemas.types import EventType, NotificationType
 
 
+def _register_event(event_type: Any):
+    if event_type is None:
+        return lambda func: func
+    return eventmanager.register(event_type)
+
+
 class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.6"
+    plugin_version = "0.0.7"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -56,7 +62,7 @@ class DownloadAddedNotify(_PluginBase):
     def get_state(self) -> bool:
         return self._enabled
 
-    @eventmanager.register(EventType.DownloadAdded)
+    @_register_event(getattr(EventType, "DownloadAdded", None))
     def download_added(self, event: Event):
         if not self._enabled or self._notify_stage not in ("download_added", "both"):
             return
@@ -139,7 +145,7 @@ class DownloadAddedNotify(_PluginBase):
         except Exception as err:
             logger.error(f"{self.plugin_name}: 发送下载添加通知失败 - {err}", exc_info=True)
 
-    @eventmanager.register(EventType.TransferComplete)
+    @_register_event(getattr(EventType, "TransferComplete", None))
     def transfer_complete(self, event: Event):
         if not self._enabled or self._notify_stage not in ("transfer_complete", "both"):
             return
