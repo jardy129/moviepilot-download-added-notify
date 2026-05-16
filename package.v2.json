@@ -2,12 +2,13 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.0.2",
+    "version": "0.0.3",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png",
     "author": "jardy",
     "level": 1,
     "v2": true,
     "history": {
+      "v0.0.3": "增加 Qbittorrent 手动添加任务轮询通知",
       "v0.0.2": "增加整理完成通知选项并修正下载添加事件信息解析",
       "v0.0.1": "初始版本：监听 DownloadAdded 事件并调用系统通知"
     }

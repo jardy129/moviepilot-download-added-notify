@@ -1,16 +1,17 @@
-from app.schemas.types import EventType, NotificationType
-from app.core.event import Event, eventmanager
-from app.plugins import _PluginBase
-from app.log import logger
-
 from typing import Any, Dict, List, Optional
+
+from app.core.event import Event, eventmanager
+from app.log import logger
+from app.modules.qbittorrent import QbittorrentModule
+from app.plugins import _PluginBase
+from app.schemas.types import EventType, NotificationType
 
 
 class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.2"
+    plugin_version = "0.0.3"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -24,6 +25,9 @@ class DownloadAddedNotify(_PluginBase):
     _complete_title_prefix = "[下载已完成]"
     _only_downloader = ""
     _include_raw_summary = False
+    _qb_poll_enabled = True
+    _qb_poll_interval = 60
+    _qb_seen_hashes_key = "qb_seen_hashes"
 
     def init_plugin(self, config: Optional[dict] = None):
         if not config:
@@ -36,6 +40,8 @@ class DownloadAddedNotify(_PluginBase):
         self._complete_title_prefix = config.get("complete_title_prefix") or "[下载已完成]"
         self._only_downloader = (config.get("only_downloader") or "").strip()
         self._include_raw_summary = bool(config.get("include_raw_summary"))
+        self._qb_poll_enabled = bool(config.get("qb_poll_enabled", True))
+        self._qb_poll_interval = self._safe_int(config.get("qb_poll_interval"), 60, 15)
 
     def get_state(self) -> bool:
         return self._enabled
@@ -187,6 +193,107 @@ class DownloadAddedNotify(_PluginBase):
         except Exception as err:
             logger.error(f"{self.plugin_name}: 发送下载完成通知失败 - {err}", exc_info=True)
 
+    def poll_qb_torrents(self):
+        if not self._enabled or not self._qb_poll_enabled:
+            return
+
+        try:
+            qb_module = QbittorrentModule()
+            qb_module.init_module()
+            instances = qb_module.get_instances()
+        except Exception as err:
+            logger.error(f"{self.plugin_name}: 初始化 Qbittorrent 下载器失败 - {err}", exc_info=True)
+            return
+
+        if not instances:
+            logger.warn(f"{self.plugin_name}: 未找到已启用的 Qbittorrent 下载器配置")
+            return
+
+        previous_hashes = set(self.get_data(self._qb_seen_hashes_key) or [])
+        current_hashes = set()
+        new_torrents = []
+
+        for downloader, server in instances.items():
+            if self._only_downloader and self._only_downloader.lower() not in str(downloader).lower():
+                continue
+            try:
+                if server.is_inactive():
+                    server.reconnect()
+                torrents, error = server.get_torrents()
+            except Exception as err:
+                logger.error(f"{self.plugin_name}: 查询 Qbittorrent 任务失败 - {downloader}: {err}", exc_info=True)
+                continue
+            if error:
+                logger.error(f"{self.plugin_name}: 查询 Qbittorrent 任务失败 - {downloader}")
+                continue
+
+            for torrent in torrents or []:
+                torrent_data = self._to_dict(torrent)
+                torrent_hash = self._first_value(torrent_data, "hash")
+                if not torrent_hash:
+                    continue
+                torrent_key = f"{downloader}:{torrent_hash}"
+                current_hashes.add(torrent_key)
+                if previous_hashes and torrent_key not in previous_hashes:
+                    new_torrents.append((downloader, torrent_data))
+
+        if not previous_hashes:
+            self.save_data(self._qb_seen_hashes_key, sorted(current_hashes))
+            logger.info(f"{self.plugin_name}: 已建立 Qbittorrent 任务基线，共 {len(current_hashes)} 个任务")
+            return
+
+        for downloader, torrent_data in new_torrents:
+            self._notify_qb_torrent_added(downloader, torrent_data)
+
+        if current_hashes != previous_hashes:
+            self.save_data(self._qb_seen_hashes_key, sorted(current_hashes))
+
+    def _notify_qb_torrent_added(self, downloader: str, torrent_data: Dict[str, Any]):
+        title = self._first_value(torrent_data, "name", "title") or "未知任务"
+        save_path = self._first_value(torrent_data, "save_path", "content_path")
+        category = self._first_value(torrent_data, "category")
+        tags = self._first_value(torrent_data, "tags")
+        size = self._first_value(torrent_data, "total_size", "size")
+        torrent_hash = self._first_value(torrent_data, "hash")
+        state = self._first_value(torrent_data, "state")
+
+        lines = [f"名称：{title}", f"下载器：{downloader}"]
+        if state:
+            lines.append(f"状态：{state}")
+        if category:
+            lines.append(f"分类：{category}")
+        if tags:
+            lines.append(f"标签：{tags}")
+        if size:
+            lines.append(f"大小：{size}")
+        if save_path:
+            lines.append(f"目录：{save_path}")
+        if torrent_hash:
+            lines.append(f"HASH：{torrent_hash}")
+        if self._include_raw_summary:
+            lines.append("")
+            lines.append("事件字段：")
+            for key, value in sorted(torrent_data.items()):
+                if value is None or isinstance(value, (dict, list, tuple, set)):
+                    continue
+                lines.append(f"- {key}: {value}")
+
+        try:
+            self.post_message(
+                mtype=self._notification_type(),
+                title=f"{self._title_prefix} {title}",
+                text="\n".join(lines),
+            )
+            logger.info(f"{self.plugin_name}: 已发送 Qbittorrent 新任务通知 - {title}")
+        except TypeError:
+            self.post_message(
+                title=f"{self._title_prefix} {title}",
+                text="\n".join(lines),
+            )
+            logger.info(f"{self.plugin_name}: 已发送 Qbittorrent 新任务通知 - {title}")
+        except Exception as err:
+            logger.error(f"{self.plugin_name}: 发送 Qbittorrent 新任务通知失败 - {err}", exc_info=True)
+
     def get_form(self):
         return [
             {
@@ -298,6 +405,35 @@ class DownloadAddedNotify(_PluginBase):
                                     }
                                 ],
                             },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "qb_poll_enabled",
+                                            "label": "轮询 Qbittorrent 手动添加任务",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "qb_poll_interval",
+                                            "label": "Qbittorrent 轮询间隔（秒）",
+                                            "type": "number",
+                                            "min": 15,
+                                            "placeholder": "60",
+                                        },
+                                    }
+                                ],
+                            },
                         ],
                     }
                 ],
@@ -310,6 +446,8 @@ class DownloadAddedNotify(_PluginBase):
             "complete_title_prefix": "[下载已完成]",
             "only_downloader": "",
             "include_raw_summary": False,
+            "qb_poll_enabled": True,
+            "qb_poll_interval": 60,
         }
 
     def get_command(self) -> List[Dict[str, Any]]:
@@ -319,7 +457,17 @@ class DownloadAddedNotify(_PluginBase):
         return []
 
     def get_service(self) -> List[Dict[str, Any]]:
-        return []
+        if not self._enabled or not self._qb_poll_enabled:
+            return []
+        return [
+            {
+                "id": "qb_poll_torrents",
+                "name": "轮询 Qbittorrent 手动添加任务",
+                "trigger": "interval",
+                "func": self.poll_qb_torrents,
+                "kwargs": {"seconds": self._qb_poll_interval},
+            }
+        ]
 
     def stop_service(self):
         pass
@@ -369,6 +517,14 @@ class DownloadAddedNotify(_PluginBase):
         if isinstance(value, (list, tuple, set)):
             return ", ".join(str(item) for item in value)
         return str(value)
+
+    @staticmethod
+    def _safe_int(value: Any, default: int, minimum: int) -> int:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return default
+        return max(number, minimum)
 
     @staticmethod
     def _get_context_value(context: Any, key: str) -> Any:
