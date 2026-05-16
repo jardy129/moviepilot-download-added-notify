@@ -45,7 +45,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.10"
+    plugin_version = "0.0.11"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -673,6 +673,9 @@ class DownloadAddedNotify(_PluginBase):
                 "description": "由 Qbittorrent 外部程序脚本调用，用于通知手动添加或完成的种子任务",
             }
         ]
+
+    def get_page(self) -> Optional[List[dict]]:
+        return None
 
     def get_service(self) -> List[Dict[str, Any]]:
         if not self._enabled or not self._qb_poll_enabled:

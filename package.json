@@ -2,12 +2,13 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.0.10",
+    "version": "0.0.11",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png",
     "author": "jardy",
     "level": 0,
     "v2": true,
     "history": {
+      "v0.0.11": "补充 get_page 实现，兼容要求详情页抽象方法的 MoviePilot 版本",
       "v0.0.10": "降低插件认证等级，修复低认证环境下运行实例未加载导致配置页为空的问题",
       "v0.0.9": "最小化顶层依赖，提升配置页加载兼容性",
       "v0.0.8": "在插件配置页增加 qBittorrent 外部程序命令配置项",
