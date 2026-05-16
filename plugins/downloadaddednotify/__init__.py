@@ -45,7 +45,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.11"
+    plugin_version = "0.0.12"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -146,7 +146,7 @@ class DownloadAddedNotify(_PluginBase):
             or self._first_value(self._to_dict(media_info), "category", "type")
         )
         tags = self._first_value(data, "tags", "tag")
-        size = self._first_value(self._to_dict(torrent_info), "size")
+        size = self._format_size_mb(self._first_raw_value(self._to_dict(torrent_info), "size"))
         media_title = self._media_title(media_info)
         year = self._first_value(self._to_dict(media_info), "year") or self._first_value(self._to_dict(meta_info), "year")
 
@@ -221,7 +221,6 @@ class DownloadAddedNotify(_PluginBase):
             self._first_value(self._to_dict(transfer_data.get("target_item")), "path", "name")
             or self._first_value(transfer_data, "target_path", "target_dir", "file_path")
         )
-        download_hash = self._first_value(data, "download_hash")
 
         lines = [f"名称：{title}"]
         if source_path:
@@ -230,8 +229,6 @@ class DownloadAddedNotify(_PluginBase):
             lines.append(f"入库位置：{target_path}")
         if downloader:
             lines.append(f"下载器：{downloader}")
-        if download_hash:
-            lines.append(f"HASH：{download_hash}")
         if self._include_raw_summary:
             lines.append("")
             lines.append("事件字段：")
@@ -318,9 +315,8 @@ class DownloadAddedNotify(_PluginBase):
         save_path = self._first_value(torrent_data, "save_path", "content_path")
         category = self._first_value(torrent_data, "category")
         tags = self._first_value(torrent_data, "tags")
-        size = self._first_value(torrent_data, "total_size", "size")
-        torrent_hash = self._first_value(torrent_data, "hash")
         state = self._first_value(torrent_data, "state")
+        size = self._format_size_mb(self._first_raw_value(torrent_data, "total_size", "size"))
 
         lines = [f"名称：{title}", f"下载器：{downloader}"]
         if state:
@@ -333,8 +329,6 @@ class DownloadAddedNotify(_PluginBase):
             lines.append(f"大小：{size}")
         if save_path:
             lines.append(f"目录：{save_path}")
-        if torrent_hash:
-            lines.append(f"HASH：{torrent_hash}")
         if self._include_raw_summary:
             lines.append("")
             lines.append("事件字段：")
@@ -375,9 +369,8 @@ class DownloadAddedNotify(_PluginBase):
         save_path = self._first_value(payload, "save_path", "path", "content_path")
         category = self._first_value(payload, "category")
         tags = self._first_value(payload, "tags")
-        size = self._first_value(payload, "size", "total_size")
-        torrent_hash = self._first_value(payload, "hash", "info_hash")
         state = self._first_value(payload, "state")
+        size = self._format_size_mb(self._first_raw_value(payload, "size", "total_size"))
 
         event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
         prefix = self._complete_title_prefix if event in ("completed", "finished", "done") else self._title_prefix
@@ -392,8 +385,6 @@ class DownloadAddedNotify(_PluginBase):
             lines.append(f"大小：{size}")
         if save_path:
             lines.append(f"目录：{save_path}")
-        if torrent_hash:
-            lines.append(f"HASH：{torrent_hash}")
         if self._include_raw_summary:
             lines.append("")
             lines.append("事件字段：")
@@ -759,10 +750,17 @@ class DownloadAddedNotify(_PluginBase):
 
     @classmethod
     def _first_value(cls, data: Dict[str, Any], *keys: str) -> Optional[Any]:
+        value = cls._first_raw_value(data, *keys)
+        if value not in (None, ""):
+            return cls._stringify(value)
+        return None
+
+    @staticmethod
+    def _first_raw_value(data: Dict[str, Any], *keys: str) -> Optional[Any]:
         for key in keys:
             value = data.get(key)
             if value not in (None, ""):
-                return cls._stringify(value)
+                return value
         return None
 
     @staticmethod
@@ -770,6 +768,23 @@ class DownloadAddedNotify(_PluginBase):
         if isinstance(value, (list, tuple, set)):
             return ", ".join(str(item) for item in value)
         return str(value)
+
+    @staticmethod
+    def _format_size_mb(value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        try:
+            size = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if size <= 0:
+            return None
+        mb = size / 1024 / 1024
+        if mb >= 100:
+            return f"{mb:.0f} MB"
+        if mb >= 10:
+            return f"{mb:.1f} MB"
+        return f"{mb:.2f} MB"
 
     @staticmethod
     def _safe_int(value: Any, default: int, minimum: int) -> int:
