@@ -1,6 +1,7 @@
+import secrets
 from typing import Any, Dict, List, Optional
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from app.core.event import Event, eventmanager
 from app.log import logger
@@ -13,7 +14,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.4"
+    plugin_version = "0.0.5"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -30,6 +31,8 @@ class DownloadAddedNotify(_PluginBase):
     _qb_poll_enabled = True
     _qb_poll_interval = 60
     _qb_seen_hashes_key = "qb_seen_hashes"
+    _external_notify_enabled = True
+    _external_notify_token = ""
 
     def init_plugin(self, config: Optional[dict] = None):
         if not config:
@@ -44,6 +47,12 @@ class DownloadAddedNotify(_PluginBase):
         self._include_raw_summary = bool(config.get("include_raw_summary"))
         self._qb_poll_enabled = bool(config.get("qb_poll_enabled", True))
         self._qb_poll_interval = self._safe_int(config.get("qb_poll_interval"), 60, 15)
+        self._external_notify_enabled = bool(config.get("external_notify_enabled", True))
+        self._external_notify_token = (config.get("external_notify_token") or "").strip()
+        if not self._external_notify_token:
+            self._external_notify_token = secrets.token_urlsafe(24)
+            config["external_notify_token"] = self._external_notify_token
+            self.update_config(config)
 
     def get_state(self) -> bool:
         return self._enabled
@@ -298,6 +307,14 @@ class DownloadAddedNotify(_PluginBase):
 
     async def qbittorrent_notify(self, request: Request) -> Dict[str, Any]:
         payload = await self._request_payload(request)
+        if not self._external_notify_enabled:
+            raise HTTPException(status_code=403, detail="external notify is disabled")
+        notify_token = self._first_value(payload, "token", "notify_token")
+        if not self._external_notify_token or not notify_token:
+            raise HTTPException(status_code=401, detail="missing notify token")
+        if not secrets.compare_digest(str(notify_token), self._external_notify_token):
+            raise HTTPException(status_code=401, detail="invalid notify token")
+
         event = self._first_value(payload, "event", "action") or "added"
         title = self._first_value(payload, "name", "title") or "未知任务"
         downloader = self._first_value(payload, "downloader") or "Qbittorrent"
@@ -479,6 +496,33 @@ class DownloadAddedNotify(_PluginBase):
                                     }
                                 ],
                             },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "external_notify_enabled",
+                                            "label": "启用 qBittorrent 外部程序通知接口",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "external_notify_token",
+                                            "label": "qBittorrent 外部程序通知 Token",
+                                            "placeholder": "留空保存后自动生成",
+                                        },
+                                    }
+                                ],
+                            },
                         ],
                     }
                 ],
@@ -493,6 +537,8 @@ class DownloadAddedNotify(_PluginBase):
             "include_raw_summary": False,
             "qb_poll_enabled": True,
             "qb_poll_interval": 60,
+            "external_notify_enabled": True,
+            "external_notify_token": "",
         }
 
     def get_command(self) -> List[Dict[str, Any]]:
@@ -504,7 +550,7 @@ class DownloadAddedNotify(_PluginBase):
                 "path": "/qbittorrent",
                 "endpoint": self.qbittorrent_notify,
                 "methods": ["POST"],
-                "auth": "apikey",
+                "allow_anonymous": True,
                 "summary": "接收 Qbittorrent 外部程序通知",
                 "description": "由 Qbittorrent 外部程序脚本调用，用于通知手动添加或完成的种子任务",
             }
@@ -582,18 +628,22 @@ class DownloadAddedNotify(_PluginBase):
 
     @staticmethod
     async def _request_payload(request: Request) -> Dict[str, Any]:
+        payload = dict(request.query_params)
         content_type = request.headers.get("content-type", "")
         if "application/json" in content_type:
             try:
                 data = await request.json()
-                return data if isinstance(data, dict) else {}
+                if isinstance(data, dict):
+                    payload.update(data)
+                return payload
             except Exception:
-                return {}
+                return payload
         try:
             form = await request.form()
-            return dict(form)
+            payload.update(dict(form))
+            return payload
         except Exception:
-            return dict(request.query_params)
+            return payload
 
     @staticmethod
     def _get_context_value(context: Any, key: str) -> Any:

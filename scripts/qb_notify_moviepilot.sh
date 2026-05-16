@@ -1,10 +1,10 @@
 #!/bin/sh
 
 # qBittorrent external program hook for MoviePilot.
-# Configure MP_BASE_URL and MP_API_TOKEN below, or pass them as environment variables.
+# Configure MP_BASE_URL and MP_NOTIFY_TOKEN below, or pass them as environment variables.
 
 MP_BASE_URL="${MP_BASE_URL:-http://moviepilot:3001}"
-MP_API_TOKEN="${MP_API_TOKEN:-replace_with_moviepilot_api_token}"
+MP_NOTIFY_TOKEN="${MP_NOTIFY_TOKEN:-replace_with_plugin_notify_token}"
 MP_DOWNLOADER_NAME="${MP_DOWNLOADER_NAME:-Qbittorrent}"
 
 EVENT="${1:-added}"
@@ -16,12 +16,12 @@ TAGS="${6:-}"
 SIZE="${7:-}"
 STATE="${8:-}"
 
-if [ -z "$MP_BASE_URL" ] || [ -z "$MP_API_TOKEN" ] || [ "$MP_API_TOKEN" = "replace_with_moviepilot_api_token" ]; then
-  echo "MoviePilot base URL or API token is not configured" >&2
+if [ -z "$MP_BASE_URL" ] || [ -z "$MP_NOTIFY_TOKEN" ] || [ "$MP_NOTIFY_TOKEN" = "replace_with_plugin_notify_token" ]; then
+  echo "MoviePilot base URL or plugin notify token is not configured" >&2
   exit 2
 fi
 
-curl -fsS -X POST "${MP_BASE_URL%/}/api/v1/plugin/DownloadAddedNotify/qbittorrent?apikey=${MP_API_TOKEN}" \
+curl -fsS -X POST "${MP_BASE_URL%/}/api/v1/plugin/DownloadAddedNotify/qbittorrent?token=${MP_NOTIFY_TOKEN}" \
   --data-urlencode "event=${EVENT}" \
   --data-urlencode "downloader=${MP_DOWNLOADER_NAME}" \
   --data-urlencode "name=${NAME}" \
