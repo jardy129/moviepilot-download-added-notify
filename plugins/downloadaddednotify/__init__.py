@@ -19,7 +19,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.7"
+    plugin_version = "0.0.8"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -38,6 +38,8 @@ class DownloadAddedNotify(_PluginBase):
     _qb_seen_hashes_key = "qb_seen_hashes"
     _external_notify_enabled = True
     _external_notify_token = ""
+    _moviepilot_base_url = "http://moviepilot:3001"
+    _qb_downloader_name = "Qbittorrent"
 
     def init_plugin(self, config: Optional[dict] = None):
         if not config:
@@ -54,9 +56,28 @@ class DownloadAddedNotify(_PluginBase):
         self._qb_poll_interval = self._safe_int(config.get("qb_poll_interval"), 60, 15)
         self._external_notify_enabled = bool(config.get("external_notify_enabled", True))
         self._external_notify_token = (config.get("external_notify_token") or "").strip()
+        self._moviepilot_base_url = (config.get("moviepilot_base_url") or "http://moviepilot:3001").strip()
+        self._qb_downloader_name = (config.get("qb_downloader_name") or "Qbittorrent").strip()
         if not self._external_notify_token:
             self._external_notify_token = secrets.token_urlsafe(24)
             config["external_notify_token"] = self._external_notify_token
+        config["qb_added_command"] = self._build_qb_command("added")
+        config["qb_completed_command"] = self._build_qb_command("completed")
+        if not config.get("moviepilot_base_url"):
+            config["moviepilot_base_url"] = self._moviepilot_base_url
+        if not config.get("qb_downloader_name"):
+            config["qb_downloader_name"] = self._qb_downloader_name
+        if config.get("external_notify_token") != self._external_notify_token:
+            config["external_notify_token"] = self._external_notify_token
+        saved_config = self.get_config() or {}
+        if (
+            not saved_config
+            or config.get("external_notify_token") != saved_config.get("external_notify_token")
+            or config.get("moviepilot_base_url") != saved_config.get("moviepilot_base_url")
+            or config.get("qb_downloader_name") != saved_config.get("qb_downloader_name")
+            or config.get("qb_added_command") != saved_config.get("qb_added_command")
+            or config.get("qb_completed_command") != saved_config.get("qb_completed_command")
+        ):
             self.update_config(config)
 
     def get_state(self) -> bool:
@@ -389,6 +410,34 @@ class DownloadAddedNotify(_PluginBase):
                                 "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "moviepilot_base_url",
+                                            "label": "MoviePilot 地址",
+                                            "placeholder": "http://moviepilot:3001",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "qb_downloader_name",
+                                            "label": "qBittorrent 下载器名称",
+                                            "placeholder": "Qbittorrent",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
                                         "component": "VSelect",
                                         "props": {
                                             "model": "notify_stage",
@@ -530,6 +579,38 @@ class DownloadAddedNotify(_PluginBase):
                                     }
                                 ],
                             },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VTextarea",
+                                        "props": {
+                                            "model": "qb_added_command",
+                                            "label": "qBittorrent 添加种子时运行外部程序",
+                                            "rows": 2,
+                                            "auto-grow": True,
+                                            "readonly": True,
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VTextarea",
+                                        "props": {
+                                            "model": "qb_completed_command",
+                                            "label": "qBittorrent 完成下载时运行外部程序",
+                                            "rows": 2,
+                                            "auto-grow": True,
+                                            "readonly": True,
+                                        },
+                                    }
+                                ],
+                            },
                         ],
                     }
                 ],
@@ -546,6 +627,10 @@ class DownloadAddedNotify(_PluginBase):
             "qb_poll_interval": 60,
             "external_notify_enabled": True,
             "external_notify_token": "",
+            "moviepilot_base_url": "http://moviepilot:3001",
+            "qb_downloader_name": "Qbittorrent",
+            "qb_added_command": "",
+            "qb_completed_command": "",
         }
 
     def get_command(self) -> List[Dict[str, Any]]:
@@ -583,6 +668,23 @@ class DownloadAddedNotify(_PluginBase):
         if self._notify_type == "Manual":
             return NotificationType.Manual
         return NotificationType.Download
+
+    def _build_qb_command(self, event: str) -> str:
+        base_url = (self._moviepilot_base_url or "http://moviepilot:3001").rstrip("/")
+        token = self._external_notify_token or "插件配置页里的通知Token"
+        downloader = self._qb_downloader_name or "Qbittorrent"
+        return (
+            f"curl -fsS -X POST \"{base_url}/api/v1/plugin/DownloadAddedNotify/qbittorrent?token={token}\" "
+            f"--data-urlencode \"event={event}\" "
+            f"--data-urlencode \"downloader={downloader}\" "
+            "--data-urlencode \"name=%N\" "
+            "--data-urlencode \"hash=%I\" "
+            "--data-urlencode \"save_path=%D\" "
+            "--data-urlencode \"category=%L\" "
+            "--data-urlencode \"tags=%G\" "
+            "--data-urlencode \"size=%Z\" "
+            "--data-urlencode \"state=%T\""
+        )
 
     @staticmethod
     def _to_dict(value: Any) -> Dict[str, Any]:
