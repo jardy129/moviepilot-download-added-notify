@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional
 
+from fastapi import Request
+
 from app.core.event import Event, eventmanager
 from app.log import logger
 from app.modules.qbittorrent import QbittorrentModule
@@ -11,7 +13,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.3"
+    plugin_version = "0.0.4"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -294,6 +296,49 @@ class DownloadAddedNotify(_PluginBase):
         except Exception as err:
             logger.error(f"{self.plugin_name}: 发送 Qbittorrent 新任务通知失败 - {err}", exc_info=True)
 
+    async def qbittorrent_notify(self, request: Request) -> Dict[str, Any]:
+        payload = await self._request_payload(request)
+        event = self._first_value(payload, "event", "action") or "added"
+        title = self._first_value(payload, "name", "title") or "未知任务"
+        downloader = self._first_value(payload, "downloader") or "Qbittorrent"
+        save_path = self._first_value(payload, "save_path", "path", "content_path")
+        category = self._first_value(payload, "category")
+        tags = self._first_value(payload, "tags")
+        size = self._first_value(payload, "size", "total_size")
+        torrent_hash = self._first_value(payload, "hash", "info_hash")
+        state = self._first_value(payload, "state")
+
+        event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
+        prefix = self._complete_title_prefix if event in ("completed", "finished", "done") else self._title_prefix
+        lines = [f"名称：{title}", f"来源：qBittorrent 外部程序", f"事件：{event_name}", f"下载器：{downloader}"]
+        if state:
+            lines.append(f"状态：{state}")
+        if category:
+            lines.append(f"分类：{category}")
+        if tags:
+            lines.append(f"标签：{tags}")
+        if size:
+            lines.append(f"大小：{size}")
+        if save_path:
+            lines.append(f"目录：{save_path}")
+        if torrent_hash:
+            lines.append(f"HASH：{torrent_hash}")
+        if self._include_raw_summary:
+            lines.append("")
+            lines.append("事件字段：")
+            for key, value in sorted(payload.items()):
+                if value is None or isinstance(value, (dict, list, tuple, set)):
+                    continue
+                lines.append(f"- {key}: {value}")
+
+        self.post_message(
+            mtype=self._notification_type(),
+            title=f"{prefix} {title}",
+            text="\n".join(lines),
+        )
+        logger.info(f"{self.plugin_name}: 已接收 Qbittorrent 外部程序通知 - {event}: {title}")
+        return {"success": True, "message": "ok"}
+
     def get_form(self):
         return [
             {
@@ -454,7 +499,16 @@ class DownloadAddedNotify(_PluginBase):
         return []
 
     def get_api(self) -> List[Dict[str, Any]]:
-        return []
+        return [
+            {
+                "path": "/qbittorrent",
+                "endpoint": self.qbittorrent_notify,
+                "methods": ["POST"],
+                "auth": "apikey",
+                "summary": "接收 Qbittorrent 外部程序通知",
+                "description": "由 Qbittorrent 外部程序脚本调用，用于通知手动添加或完成的种子任务",
+            }
+        ]
 
     def get_service(self) -> List[Dict[str, Any]]:
         if not self._enabled or not self._qb_poll_enabled:
@@ -525,6 +579,21 @@ class DownloadAddedNotify(_PluginBase):
         except (TypeError, ValueError):
             return default
         return max(number, minimum)
+
+    @staticmethod
+    async def _request_payload(request: Request) -> Dict[str, Any]:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                data = await request.json()
+                return data if isinstance(data, dict) else {}
+            except Exception:
+                return {}
+        try:
+            form = await request.form()
+            return dict(form)
+        except Exception:
+            return dict(request.query_params)
 
     @staticmethod
     def _get_context_value(context: Any, key: str) -> Any:
