@@ -48,7 +48,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.0"
+    plugin_version = "0.1.1"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -153,30 +153,34 @@ class DownloadAddedNotify(_PluginBase):
         media_info = self._get_context_value(context, "media_info")
         torrent_info = self._get_context_value(context, "torrent_info")
         meta_info = self._get_context_value(context, "meta_info")
+        media_data = self._to_dict(media_info)
+        torrent_data = self._to_dict(torrent_info)
+        meta_data = self._to_dict(meta_info)
 
         title = (
-            self._first_value(self._to_dict(torrent_info), "title")
+            self._first_value(torrent_data, "title")
             or self._media_title(media_info)
-            or self._first_value(self._to_dict(meta_info), "org_string", "title", "cn_name", "en_name")
+            or self._first_value(meta_data, "org_string", "title", "cn_name", "en_name")
             or "未知任务"
         )
-        site = self._first_value(self._to_dict(torrent_info), "site_name", "site")
+        site = self._first_value(torrent_data, "site_name", "site")
         save_path = self._first_value(data, "save_path", "savepath", "path", "download_path")
         category = (
-            self._first_value(self._to_dict(torrent_info), "category")
-            or self._first_value(self._to_dict(media_info), "category", "type")
+            self._first_value(torrent_data, "category")
+            or self._first_value(media_data, "category", "type")
         )
         tags = self._first_value(data, "tags", "tag")
-        size = self._format_size_gb(self._first_raw_value(self._to_dict(torrent_info), "size"))
-        quality = self._first_value(self._to_dict(torrent_info), "quality", "resolution") or self._extract_quality(title)
-        seeders = self._format_seed_count(self._first_raw_value(self._to_dict(torrent_info), "seeders", "seeds", "num_seeds"))
+        size = self._format_size_gb(self._first_raw_value(torrent_data, "size"))
+        quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
+        seeders = self._format_seed_count(self._first_raw_value(torrent_data, "seeders", "seeds", "num_seeds"))
         media_title = self._media_title(media_info)
-        year = self._first_value(self._to_dict(media_info), "year") or self._first_value(self._to_dict(meta_info), "year")
+        year = self._first_value(media_data, "year") or self._first_value(meta_data, "year")
+        episode = self._extract_episode(title, torrent_data, meta_data, media_data, data)
 
         media_text = media_title
         if media_text and year:
             media_text = f"{media_text} ({year})"
-        display_title = self._display_title(title, media_text, year, "开始下载")
+        display_title = self._display_title(title, media_text, year, "开始下载", episode)
         compact_name = self._compact_name(title)
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -341,7 +345,11 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(torrent_data, "total_size", "size"))
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
-        display_title = self._display_title(title, event_text="开始下载")
+        display_title = self._display_title(
+            title,
+            event_text="开始下载",
+            episode=self._extract_episode(title, torrent_data),
+        )
 
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -405,6 +413,7 @@ class DownloadAddedNotify(_PluginBase):
         display_title = self._display_title(
             title,
             event_text="下载完成" if event in ("completed", "finished", "done") else "开始下载",
+            episode=self._extract_episode(title, payload),
         )
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -870,12 +879,13 @@ class DownloadAddedNotify(_PluginBase):
         media_title: Any = None,
         year: Any = None,
         event_text: Optional[str] = None,
+        episode: Any = None,
     ) -> str:
         media_text = cls._clean_message_value(media_title)
-        episode = cls._extract_episode(title)
+        episode_text = cls._format_episode_text(episode) or cls._extract_episode(title)
         if media_text:
             base = cls._ensure_title_year(media_text, year or cls._extract_year(title))
-            return cls._join_title_parts(base, episode, event_text)
+            return cls._join_title_parts(base, episode_text, event_text)
 
         text = cls._clean_message_value(title) or "未知任务"
         text = re.sub(
@@ -889,15 +899,16 @@ class DownloadAddedNotify(_PluginBase):
         text = re.sub(r"[-._]+$", "", text).strip()
         text = re.sub(r"[._]+", " ", text)
         title_year = year or cls._extract_year(text)
-        if episode:
-            text = re.sub(r"\bS\d{1,2}E\d{1,3}\b", "", text, flags=re.IGNORECASE).strip()
+        if episode_text:
+            text = re.sub(r"\bS\d{1,2}\s*[-_. ]*\s*(?:E|EP)\s*\d{1,3}\b", "", text, flags=re.IGNORECASE).strip()
+            text = re.sub(r"\b\d{1,2}\s*x\s*\d{1,3}\b", "", text, flags=re.IGNORECASE).strip()
             text = re.sub(r"\b第\s*\d+\s*[集话话]\b", "", text).strip()
         if title_year:
             text = re.sub(rf"\b{re.escape(str(title_year))}\b", "", text).strip()
         text = re.sub(r"[-._]+$", "", text).strip()
         text = re.sub(r"\s+", " ", text)
         base = cls._ensure_title_year(text or "未知任务", title_year)
-        return cls._join_title_parts(base, episode, event_text)
+        return cls._join_title_parts(base, episode_text, event_text)
 
     @classmethod
     def _ensure_title_year(cls, title: Any, year: Any = None) -> str:
@@ -927,18 +938,134 @@ class DownloadAddedNotify(_PluginBase):
         match = re.search(r"\b(19\d{2}|20\d{2})\b", str(value))
         return match.group(1) if match else None
 
+    @classmethod
+    def _extract_episode(cls, *values: Any) -> Optional[str]:
+        season = None
+        episode = None
+        for value in values:
+            extracted = cls._extract_episode_from_value(value)
+            if extracted:
+                return extracted
+            current_season = cls._extract_season_number(value)
+            current_episode = cls._extract_episode_number(value)
+            season = season or current_season
+            episode = episode or current_episode
+        if season and episode:
+            return cls._format_season_episode(season, episode)
+        if episode:
+            return f"E{int(episode):02d}"
+        return None
+
+    @classmethod
+    def _extract_episode_from_value(cls, value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        if isinstance(value, dict):
+            direct = cls._first_raw_value(
+                value,
+                "season_episode",
+                "season_episode_text",
+                "episode_text",
+                "download_episodes",
+                "episodes",
+                "episode",
+                "ep",
+                "episode_number",
+                "episode_num",
+                "begin_episode",
+            )
+            extracted = cls._extract_episode_from_value(direct)
+            if extracted:
+                return extracted
+            season = cls._extract_season_number(value)
+            episode = cls._extract_episode_number(value)
+            if season and episode:
+                return cls._format_season_episode(season, episode)
+            return None
+
+        text = cls._stringify(value)
+        match = re.search(r"\bS(?:eason)?\s*0?(\d{1,2})\s*[-_. ]*\s*(?:E|EP|Episode)\s*0?(\d{1,3})\b", text, re.IGNORECASE)
+        if match:
+            return cls._format_season_episode(match.group(1), match.group(2))
+        match = re.search(r"\b0?(\d{1,2})\s*x\s*0?(\d{1,3})\b", text, re.IGNORECASE)
+        if match:
+            return cls._format_season_episode(match.group(1), match.group(2))
+        match = re.search(r"第\s*(\d+)\s*[集话]", text)
+        if match:
+            return f"第{int(match.group(1))}集"
+        match = re.search(r"\b(?:E|EP|Episode)\s*0?(\d{1,3})\b", text, re.IGNORECASE)
+        if match:
+            return f"E{int(match.group(1)):02d}"
+        return None
+
+    @classmethod
+    def _extract_season_number(cls, value: Any) -> Optional[int]:
+        if value in (None, ""):
+            return None
+        if isinstance(value, dict):
+            raw = cls._first_raw_value(value, "season", "season_number", "season_num", "season_no")
+            if raw not in (None, ""):
+                return cls._to_positive_int(raw)
+            for key in ("title", "name", "org_string"):
+                found = cls._extract_season_number(value.get(key))
+                if found:
+                    return found
+            return None
+        match = re.search(r"\bS(?:eason)?\s*0?(\d{1,2})\b", str(value), re.IGNORECASE)
+        return int(match.group(1)) if match else None
+
+    @classmethod
+    def _extract_episode_number(cls, value: Any) -> Optional[int]:
+        if value in (None, ""):
+            return None
+        if isinstance(value, dict):
+            raw = cls._first_raw_value(
+                value,
+                "episode",
+                "ep",
+                "episode_number",
+                "episode_num",
+                "episode_no",
+                "begin_episode",
+                "current_episode",
+            )
+            if raw not in (None, ""):
+                return cls._to_positive_int(raw)
+            return None
+        match = re.search(r"\b(?:E|EP|Episode)\s*0?(\d{1,3})\b", str(value), re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        match = re.search(r"第\s*(\d+)\s*[集话]", str(value))
+        return int(match.group(1)) if match else None
+
     @staticmethod
-    def _extract_episode(value: Any) -> Optional[str]:
+    def _format_episode_text(value: Any) -> Optional[str]:
         if value in (None, ""):
             return None
         text = str(value)
-        match = re.search(r"\bS\d{1,2}E\d{1,3}\b", text, re.IGNORECASE)
-        if match:
-            return match.group(0).upper()
-        match = re.search(r"第\s*(\d+)\s*[集话话]", text)
-        if match:
-            return f"第{match.group(1)}集"
+        if re.match(r"^S\d{2}E\d{2,3}$", text, re.IGNORECASE):
+            return text.upper()
+        if re.match(r"^E\d{2,3}$", text, re.IGNORECASE):
+            return text.upper()
+        if re.match(r"^第\d+集$", text):
+            return text
         return None
+
+    @staticmethod
+    def _format_season_episode(season: Any, episode: Any) -> Optional[str]:
+        season_number = DownloadAddedNotify._to_positive_int(season)
+        episode_number = DownloadAddedNotify._to_positive_int(episode)
+        if not season_number or not episode_number:
+            return None
+        return f"S{season_number:02d}E{episode_number:02d}"
+
+    @staticmethod
+    def _to_positive_int(value: Any) -> Optional[int]:
+        try:
+            number = int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
 
     @classmethod
     def _compact_name(cls, value: Any, max_len: int = 96) -> Optional[str]:
