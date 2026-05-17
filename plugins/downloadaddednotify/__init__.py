@@ -45,7 +45,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.12"
+    plugin_version = "0.0.13"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -150,24 +150,20 @@ class DownloadAddedNotify(_PluginBase):
         media_title = self._media_title(media_info)
         year = self._first_value(self._to_dict(media_info), "year") or self._first_value(self._to_dict(meta_info), "year")
 
-        lines = [f"名称：{title}"]
-        if media_title:
-            media_text = str(media_title)
-            if year:
-                media_text = f"{media_text} ({year})"
-            lines.append(f"媒体：{media_text}")
-        if site:
-            lines.append(f"站点：{site}")
-        if downloader:
-            lines.append(f"下载器：{downloader}")
-        if category:
-            lines.append(f"分类：{category}")
-        if tags:
-            lines.append(f"标签：{tags}")
-        if size:
-            lines.append(f"大小：{size}")
-        if save_path:
-            lines.append(f"目录：{save_path}")
+        media_text = media_title
+        if media_text and year:
+            media_text = f"{media_text} ({year})"
+        lines = self._message_lines(
+            ("任务", title),
+            ("事件", "下载已添加"),
+            ("媒体", media_text),
+            ("站点", site),
+            ("下载器", downloader),
+            ("大小", size),
+            ("分类", category),
+            ("标签", tags),
+            ("目录", save_path),
+        )
         if self._include_raw_summary:
             lines.append("")
             lines.append("事件字段：")
@@ -222,13 +218,13 @@ class DownloadAddedNotify(_PluginBase):
             or self._first_value(transfer_data, "target_path", "target_dir", "file_path")
         )
 
-        lines = [f"名称：{title}"]
-        if source_path:
-            lines.append(f"源文件：{source_path}")
-        if target_path:
-            lines.append(f"入库位置：{target_path}")
-        if downloader:
-            lines.append(f"下载器：{downloader}")
+        lines = self._message_lines(
+            ("任务", title),
+            ("事件", "下载已完成"),
+            ("下载器", downloader),
+            ("源文件", source_path),
+            ("入库位置", target_path),
+        )
         if self._include_raw_summary:
             lines.append("")
             lines.append("事件字段：")
@@ -318,17 +314,17 @@ class DownloadAddedNotify(_PluginBase):
         state = self._first_value(torrent_data, "state")
         size = self._format_size_mb(self._first_raw_value(torrent_data, "total_size", "size"))
 
-        lines = [f"名称：{title}", f"下载器：{downloader}"]
-        if state:
-            lines.append(f"状态：{state}")
-        if category:
-            lines.append(f"分类：{category}")
-        if tags:
-            lines.append(f"标签：{tags}")
-        if size:
-            lines.append(f"大小：{size}")
-        if save_path:
-            lines.append(f"目录：{save_path}")
+        lines = self._message_lines(
+            ("任务", title),
+            ("事件", "下载已添加"),
+            ("来源", "qBittorrent 轮询"),
+            ("下载器", downloader),
+            ("状态", self._format_qb_state(state)),
+            ("大小", size),
+            ("分类", category),
+            ("标签", tags),
+            ("目录", save_path),
+        )
         if self._include_raw_summary:
             lines.append("")
             lines.append("事件字段：")
@@ -374,17 +370,17 @@ class DownloadAddedNotify(_PluginBase):
 
         event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
         prefix = self._complete_title_prefix if event in ("completed", "finished", "done") else self._title_prefix
-        lines = [f"名称：{title}", f"来源：qBittorrent 外部程序", f"事件：{event_name}", f"下载器：{downloader}"]
-        if state:
-            lines.append(f"状态：{state}")
-        if category:
-            lines.append(f"分类：{category}")
-        if tags:
-            lines.append(f"标签：{tags}")
-        if size:
-            lines.append(f"大小：{size}")
-        if save_path:
-            lines.append(f"目录：{save_path}")
+        lines = self._message_lines(
+            ("任务", title),
+            ("事件", event_name),
+            ("来源", "qBittorrent 外部程序"),
+            ("下载器", downloader),
+            ("状态", self._format_qb_state(state)),
+            ("大小", size),
+            ("分类", category),
+            ("标签", tags),
+            ("目录", save_path),
+        )
         if self._include_raw_summary:
             lines.append("")
             lines.append("事件字段：")
@@ -768,6 +764,51 @@ class DownloadAddedNotify(_PluginBase):
         if isinstance(value, (list, tuple, set)):
             return ", ".join(str(item) for item in value)
         return str(value)
+
+    @classmethod
+    def _message_lines(cls, *items: tuple) -> List[str]:
+        lines = []
+        for label, value in items:
+            text = cls._clean_message_value(value)
+            if text:
+                lines.append(f"{label}：{text}")
+        return lines
+
+    @classmethod
+    def _clean_message_value(cls, value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        text = cls._stringify(value).strip()
+        if not text:
+            return None
+        return " ".join(text.splitlines())
+
+    @staticmethod
+    def _format_qb_state(state: Any) -> Optional[str]:
+        if state in (None, ""):
+            return None
+        text = str(state)
+        state_map = {
+            "allocating": "分配空间",
+            "checkingdl": "校验中",
+            "checkingup": "校验中",
+            "checkingresumedata": "校验恢复数据",
+            "downloading": "下载中",
+            "error": "错误",
+            "forceddl": "强制下载",
+            "forcedup": "强制做种",
+            "metadl": "获取元数据",
+            "missingfiles": "文件缺失",
+            "moved": "已移动",
+            "pauseddl": "已暂停",
+            "pausedup": "已暂停做种",
+            "queueddl": "排队下载",
+            "queuedup": "排队做种",
+            "stalleddl": "等待下载",
+            "stalledup": "等待做种",
+            "uploading": "做种中",
+        }
+        return state_map.get(text.lower(), text)
 
     @staticmethod
     def _format_size_mb(value: Any) -> Optional[str]:
