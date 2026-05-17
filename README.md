@@ -1,4 +1,4 @@
-# MoviePilot 下载添加通知插件
+# MoviePilot 手动添加通知插件
 
 这个插件用于监听 MoviePilot 的 `DownloadAdded` 事件，并调用 MoviePilot 自带的系统通知能力发送一条“已添加下载”的通知。
 
