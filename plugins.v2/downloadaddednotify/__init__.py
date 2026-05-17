@@ -1,3 +1,4 @@
+import os
 import re
 import secrets
 from datetime import datetime
@@ -48,7 +49,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.1"
+    plugin_version = "0.1.2"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -70,6 +71,17 @@ class DownloadAddedNotify(_PluginBase):
     _moviepilot_base_url = "http://moviepilot:3001"
     _qb_downloader_name = "Qbittorrent"
     _header_image_url = ""
+    _video_extensions = {
+        ".mkv",
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".ts",
+        ".m2ts",
+        ".wmv",
+        ".flv",
+        ".rmvb",
+    }
     _label_icons = {
         "时间": "🕒",
         "媒体": "🎬",
@@ -337,6 +349,7 @@ class DownloadAddedNotify(_PluginBase):
 
     def _notify_qb_torrent_added(self, downloader: str, torrent_data: Dict[str, Any]):
         title = self._first_value(torrent_data, "name", "title") or "未知任务"
+        content_path = self._first_value(torrent_data, "content_path", "contentPath", "file_path", "path")
         save_path = self._first_value(torrent_data, "save_path", "content_path")
         category = self._first_value(torrent_data, "category")
         tags = self._first_value(torrent_data, "tags")
@@ -348,7 +361,12 @@ class DownloadAddedNotify(_PluginBase):
         display_title = self._display_title(
             title,
             event_text="开始下载",
-            episode=self._extract_episode(title, torrent_data),
+            episode=self._extract_episode(
+                title,
+                torrent_data,
+                self._extract_episode_from_download_path(content_path),
+                self._extract_episode_from_download_path(save_path),
+            ),
         )
 
         lines = self._message_lines(
@@ -400,6 +418,7 @@ class DownloadAddedNotify(_PluginBase):
         event = self._first_value(payload, "event", "action") or "added"
         title = self._first_value(payload, "name", "title") or "未知任务"
         downloader = self._first_value(payload, "downloader") or "Qbittorrent"
+        content_path = self._first_value(payload, "content_path", "contentPath", "file_path")
         save_path = self._first_value(payload, "save_path", "path", "content_path")
         category = self._first_value(payload, "category")
         tags = self._first_value(payload, "tags")
@@ -413,7 +432,12 @@ class DownloadAddedNotify(_PluginBase):
         display_title = self._display_title(
             title,
             event_text="下载完成" if event in ("completed", "finished", "done") else "开始下载",
-            episode=self._extract_episode(title, payload),
+            episode=self._extract_episode(
+                title,
+                payload,
+                self._extract_episode_from_download_path(content_path),
+                self._extract_episode_from_download_path(save_path),
+            ),
         )
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -798,7 +822,8 @@ class DownloadAddedNotify(_PluginBase):
             "--data-urlencode \"category=%L\" "
             "--data-urlencode \"tags=%G\" "
             "--data-urlencode \"size=%Z\" "
-            "--data-urlencode \"tracker=%T\""
+            "--data-urlencode \"tracker=%T\" "
+            "--data-urlencode \"content_path=%F\""
         )
 
     @staticmethod
@@ -1037,6 +1062,58 @@ class DownloadAddedNotify(_PluginBase):
             return int(match.group(1))
         match = re.search(r"第\s*(\d+)\s*[集话]", str(value))
         return int(match.group(1)) if match else None
+
+    @classmethod
+    def _extract_episode_from_download_path(cls, value: Any) -> Optional[str]:
+        path = cls._clean_message_value(value)
+        if not path:
+            return None
+        episode = cls._extract_episode_from_value(os.path.basename(path))
+        if episode:
+            return episode
+        if not os.path.exists(path):
+            return None
+        if os.path.isfile(path):
+            return cls._extract_episode_from_value(os.path.basename(path))
+        if not os.path.isdir(path):
+            return None
+
+        candidates = cls._download_path_candidates(path)
+        for name in candidates:
+            episode = cls._extract_episode_from_value(name)
+            if episode:
+                return episode
+        return None
+
+    @classmethod
+    def _download_path_candidates(cls, root: str, max_depth: int = 2, max_items: int = 300) -> List[str]:
+        candidates = []
+        stack = [(root, 0)]
+        scanned = 0
+        while stack and scanned < max_items:
+            current, depth = stack.pop(0)
+            try:
+                entries = sorted(os.scandir(current), key=lambda item: item.name.lower())
+            except (OSError, PermissionError):
+                continue
+            for entry in entries:
+                scanned += 1
+                if scanned > max_items:
+                    break
+                name = entry.name
+                try:
+                    if entry.is_file():
+                        ext = os.path.splitext(name)[1].lower()
+                        if ext in cls._video_extensions:
+                            candidates.insert(0, name)
+                        else:
+                            candidates.append(name)
+                    elif entry.is_dir() and depth < max_depth:
+                        candidates.append(name)
+                        stack.append((entry.path, depth + 1))
+                except (OSError, PermissionError):
+                    continue
+        return candidates
 
     @staticmethod
     def _format_episode_text(value: Any) -> Optional[str]:

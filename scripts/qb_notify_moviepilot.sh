@@ -15,6 +15,7 @@ CATEGORY="${5:-}"
 TAGS="${6:-}"
 SIZE="${7:-}"
 TRACKER="${8:-}"
+CONTENT_PATH="${9:-}"
 
 if [ -z "$MP_BASE_URL" ] || [ -z "$MP_NOTIFY_TOKEN" ] || [ "$MP_NOTIFY_TOKEN" = "replace_with_plugin_notify_token" ]; then
   echo "MoviePilot base URL or plugin notify token is not configured" >&2
@@ -30,4 +31,5 @@ curl -fsS -X POST "${MP_BASE_URL%/}/api/v1/plugin/DownloadAddedNotify/qbittorren
   --data-urlencode "category=${CATEGORY}" \
   --data-urlencode "tags=${TAGS}" \
   --data-urlencode "size=${SIZE}" \
-  --data-urlencode "tracker=${TRACKER}"
+  --data-urlencode "tracker=${TRACKER}" \
+  --data-urlencode "content_path=${CONTENT_PATH}"
