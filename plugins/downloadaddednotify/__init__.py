@@ -47,8 +47,8 @@ def _register_event(event_type: Any):
 class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
-    plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.17"
+    plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
+    plugin_version = "0.0.18"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -81,7 +81,6 @@ class DownloadAddedNotify(_PluginBase):
         "做种": "🌱",
         "标签": "🏷",
         "名称": "📛",
-        "描述": "📝",
         "下载器": "⬇️",
         "目录": "📁",
         "状态": "📌",
@@ -171,12 +170,6 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(self._to_dict(torrent_info), "size"))
         quality = self._first_value(self._to_dict(torrent_info), "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(self._to_dict(torrent_info), "seeders", "seeds", "num_seeds"))
-        subtitle = self._first_value(self._to_dict(torrent_info), "subtitle", "sub_title")
-        description = self._build_description(
-            title,
-            self._first_value(self._to_dict(torrent_info), "description", "descr"),
-            subtitle,
-        )
         media_title = self._media_title(media_info)
         year = self._first_value(self._to_dict(media_info), "year") or self._first_value(self._to_dict(meta_info), "year")
 
@@ -195,7 +188,6 @@ class DownloadAddedNotify(_PluginBase):
             ("类别", category),
             ("标签", tags),
             ("名称", compact_name),
-            ("描述", description),
             ("下载器", downloader),
             ("目录", save_path),
         )
@@ -350,7 +342,6 @@ class DownloadAddedNotify(_PluginBase):
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
         display_title = self._display_title(title, event_text="开始下载")
-        description = self._build_description(title, self._first_value(torrent_data, "description", "subtitle"))
 
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -362,7 +353,6 @@ class DownloadAddedNotify(_PluginBase):
             ("类别", category),
             ("标签", tags),
             ("名称", self._compact_name(title)),
-            ("描述", description),
             ("下载器", downloader),
             ("目录", save_path),
         )
@@ -410,11 +400,6 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(payload, "size", "total_size"))
         quality = self._first_value(payload, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
-        description = self._build_description(
-            title,
-            self._first_value(payload, "description", "descr"),
-            self._first_value(payload, "subtitle", "sub_title"),
-        )
 
         event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
         display_title = self._display_title(
@@ -432,7 +417,6 @@ class DownloadAddedNotify(_PluginBase):
             ("类别", category),
             ("标签", tags),
             ("名称", self._compact_name(title)),
-            ("描述", description),
             ("下载器", downloader),
             ("目录", save_path),
         )
@@ -864,7 +848,10 @@ class DownloadAddedNotify(_PluginBase):
             if text:
                 icon = cls._label_icons.get(label)
                 label_text = f"{icon} {label}" if icon else label
-                lines.append(f"{label_text}： {text}")
+                if label == "名称":
+                    lines.append(f"{label_text}：\n{text}")
+                else:
+                    lines.append(f"{label_text}： {text}")
         return lines
 
     @classmethod
@@ -954,18 +941,6 @@ class DownloadAddedNotify(_PluginBase):
         return None
 
     @classmethod
-    def _build_description(cls, title: Any, *parts: Any) -> Optional[str]:
-        values = []
-        for item in parts:
-            text = cls._clean_message_value(item)
-            if text and text not in values:
-                values.append(text)
-        title_text = cls._compact_name(title, 120)
-        if title_text and title_text not in values:
-            values.append(title_text)
-        return " | ".join(values) if values else None
-
-    @classmethod
     def _compact_name(cls, value: Any, max_len: int = 96) -> Optional[str]:
         text = cls._clean_message_value(value)
         if not text:
@@ -1041,7 +1016,32 @@ class DownloadAddedNotify(_PluginBase):
         if "/" in host:
             host = host.split("/", 1)[0]
         host = re.sub(r"^(tracker|announce|tr)[-_.]?\d*[-_.]+", "", host, flags=re.IGNORECASE)
-        return host or text
+        return DownloadAddedNotify._main_domain(host) or host or text
+
+    @staticmethod
+    def _main_domain(host: str) -> Optional[str]:
+        labels = [part for part in host.lower().strip(".").split(".") if part]
+        if len(labels) <= 2:
+            return ".".join(labels) if labels else None
+        if labels[0] == "www":
+            labels = labels[1:]
+        if len(labels) <= 2:
+            return ".".join(labels) if labels else None
+        second_level_suffixes = {
+            "com.cn",
+            "net.cn",
+            "org.cn",
+            "gov.cn",
+            "edu.cn",
+            "co.uk",
+            "org.uk",
+            "com.au",
+            "net.au",
+        }
+        suffix = ".".join(labels[-2:])
+        if suffix in second_level_suffixes and len(labels) >= 3:
+            return ".".join(labels[-3:])
+        return ".".join(labels[-2:])
 
     @staticmethod
     def _format_seed_count(value: Any) -> Optional[str]:
