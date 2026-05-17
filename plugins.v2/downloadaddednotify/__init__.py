@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.3"
+    plugin_version = "0.1.4"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -1021,10 +1021,25 @@ class DownloadAddedNotify(_PluginBase):
                 icon = cls._label_icons.get(label)
                 label_text = f"{icon} {label}" if icon else label
                 if label == "名称":
-                    lines.append(f"{label_text}：\n{text}")
+                    lines.append(cls._format_wrapped_line(label_text, text))
                 else:
                     lines.append(f"{label_text}： {text}")
         return lines
+
+    @staticmethod
+    def _format_wrapped_line(label: str, text: str, max_width: int = 30) -> str:
+        prefix = f"{label}： "
+        if len(text) <= max_width:
+            return f"{prefix}{text}"
+        indent = " " * len(prefix)
+        chunks = []
+        current = text
+        while len(current) > max_width:
+            chunks.append(current[:max_width])
+            current = current[max_width:]
+        if current:
+            chunks.append(current)
+        return prefix + ("\n" + indent).join(chunks)
 
     @classmethod
     def _clean_message_value(cls, value: Any) -> Optional[str]:
