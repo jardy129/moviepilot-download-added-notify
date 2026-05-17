@@ -52,7 +52,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
     plugin_version = "0.1.4"
     plugin_author = "jardy"
-    author_url = ""
+    author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
     plugin_order = 66
     auth_level = 0
