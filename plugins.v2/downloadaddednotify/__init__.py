@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.5"
+    plugin_version = "0.1.6"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -184,8 +184,8 @@ class DownloadAddedNotify(_PluginBase):
 
         title = (
             self._first_value(torrent_data, "title")
-            or self._media_title(media_info)
-            or self._first_value(meta_data, "org_string", "title", "cn_name", "en_name")
+            or self._media_title(media_info, meta_info)
+            or self._preferred_title(meta_data)
             or "未知任务"
         )
         site = self._first_value(torrent_data, "site_name", "site")
@@ -198,7 +198,7 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(torrent_data, "size"))
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "seeders", "seeds", "num_seeds"))
-        media_title = self._media_title(media_info)
+        media_title = self._media_title(media_info, meta_info)
         year = self._first_value(media_data, "year") or self._first_value(meta_data, "year")
         episode = self._extract_episode(title, torrent_data, meta_data, media_data, data)
 
@@ -261,8 +261,8 @@ class DownloadAddedNotify(_PluginBase):
         transferinfo = data.get("transferinfo")
 
         title = (
-            self._media_title(media_info)
-            or self._first_value(self._to_dict(meta_info), "org_string", "title", "cn_name", "en_name")
+            self._media_title(media_info, meta_info)
+            or self._preferred_title(self._to_dict(meta_info))
             or self._first_value(self._to_dict(fileitem), "name", "path")
             or "未知任务"
         )
@@ -1497,10 +1497,62 @@ class DownloadAddedNotify(_PluginBase):
         return getattr(context, key, None)
 
     @classmethod
-    def _media_title(cls, media_info: Any) -> Optional[str]:
-        data = cls._to_dict(media_info)
-        title = cls._first_value(data, "title", "name", "cn_name", "en_name")
-        year = cls._first_value(data, "year")
-        if title and year:
-            return f"{title} ({year})"
-        return title
+    def _media_title(cls, media_info: Any, meta_info: Any = None) -> Optional[str]:
+        title = cls._preferred_title(cls._to_dict(media_info))
+        if title:
+            return title
+        return cls._preferred_title(cls._to_dict(meta_info))
+
+    @classmethod
+    def _preferred_title(cls, data: Dict[str, Any]) -> Optional[str]:
+        if not data:
+            return None
+
+        for key in ("cn_name", "chinese_name", "zh_name"):
+            title = cls._clean_title_candidate(cls._first_value(data, key))
+            if title:
+                return title
+
+        title_candidates = [
+            cls._first_value(data, "title"),
+            cls._first_value(data, "name"),
+            cls._first_value(data, "org_string"),
+        ]
+        for candidate in title_candidates:
+            title = cls._clean_title_candidate(candidate, prefer_chinese=True)
+            if title:
+                return title
+
+        for key in ("en_name", "original_name", "original_title"):
+            title = cls._clean_title_candidate(cls._first_value(data, key))
+            if title:
+                return title
+
+        for candidate in title_candidates:
+            title = cls._clean_title_candidate(candidate)
+            if title:
+                return title
+        return None
+
+    @classmethod
+    def _clean_title_candidate(cls, value: Any, prefer_chinese: bool = False) -> Optional[str]:
+        text = cls._clean_message_value(value)
+        if not text:
+            return None
+        text = re.sub(r"[._]+", " ", text).strip()
+        if prefer_chinese:
+            chinese_match = re.match(r"^([\u4e00-\u9fff][\u4e00-\u9fff\s·、，,：:《》「」『』!！?？-]*)\s+[A-Za-z]", text)
+            if chinese_match:
+                text = chinese_match.group(1).strip()
+            elif not cls._has_cjk(text):
+                return None
+        text = re.sub(r"\b(19\d{2}|20\d{2})\b", "", text)
+        text = re.sub(r"\bS\d{1,2}(?:\s*[-_. ]*\s*(?:E|EP)\s*\d{1,3})?\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(2160p|1080p|720p|480p|WEB-?DL|WEBRip|BluRay|BDRip|HDTV|DVDRip|H\.?265|H\.?264|HEVC|AVC|x265|x264).*$", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"[-_\s.]+$", "", text).strip()
+        text = re.sub(r"\s+", " ", text)
+        return text or None
+
+    @staticmethod
+    def _has_cjk(value: str) -> bool:
+        return bool(re.search(r"[\u4e00-\u9fff]", value))
