@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.9"
+    plugin_version = "0.1.10"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -382,15 +382,16 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(torrent_data, "total_size", "size"))
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
+        episode = self._extract_episode(
+            title,
+            torrent_data,
+            self._extract_episode_from_download_path(content_path),
+            self._extract_episode_from_download_path(save_path),
+        )
         display_title = self._display_title(
             title,
             event_text="开始下载",
-            episode=self._extract_episode(
-                title,
-                torrent_data,
-                self._extract_episode_from_download_path(content_path),
-                self._extract_episode_from_download_path(save_path),
-            ),
+            episode=episode,
         )
 
         lines = self._message_lines(
@@ -406,12 +407,7 @@ class DownloadAddedNotify(_PluginBase):
                 "名称",
                 self._compact_name(
                     title,
-                    episode=self._extract_episode(
-                        title,
-                        payload,
-                        self._extract_episode_from_download_path(content_path),
-                        self._extract_episode_from_download_path(save_path),
-                    ),
+                    episode=episode,
                 ),
             ),
             ("下载器", downloader),
@@ -1053,11 +1049,7 @@ class DownloadAddedNotify(_PluginBase):
         text = cls._clean_multiline_message_value(value)
         if not text:
             return ""
-        if "\n" in text:
-            if text.startswith("🔹名称："):
-                return text
-            return f"{label}：\n{text}"
-        return cls._format_wrapped_line(label, text)
+        return f"{label}：{text}"
 
     @classmethod
     def _clean_multiline_message_value(cls, value: Any) -> Optional[str]:
@@ -1172,36 +1164,23 @@ class DownloadAddedNotify(_PluginBase):
     @classmethod
     def _ensure_title_year(cls, title: Any, year: Any = None) -> str:
         text = cls._clean_message_value(title) or "未知任务"
-        if re.search(r"\(\d{4}年\)", text):
-            return text
-        text = re.sub(r"\((\d{4})\)", r"(\1年)", text)
-        if re.search(r"\(\d{4}年\)", text):
+        if re.search(r"\(\d{4}\)", text):
             return text
         title_year = year or cls._extract_year(text)
         if title_year:
             text = re.sub(rf"\b{re.escape(str(title_year))}\b", "", text).strip()
             text = re.sub(r"[-._]+$", "", text).strip()
-            return f"{text} ({title_year}年)"
+            return f"{text} ({title_year})"
         return text
 
     @classmethod
     def _join_title_parts(cls, title: str, episode: Optional[str], event_text: Optional[str]) -> str:
         parts = [title]
         if episode:
-            parts.append(cls._format_title_episode_text(episode) or episode)
+            parts.append(episode)
         if event_text:
             parts.append(event_text)
         return cls._compact_name(" ".join(parts), 64) or "未知任务"
-
-    @staticmethod
-    def _format_title_episode_text(value: Any) -> Optional[str]:
-        if value in (None, ""):
-            return None
-        text = str(value).strip()
-        match = re.match(r"^(S\d{2})E(\d{2,3})$", text, re.IGNORECASE)
-        if match:
-            return f"{match.group(1).upper()} E{match.group(2)}"
-        return text
 
     @staticmethod
     def _extract_year(value: Any) -> Optional[str]:
@@ -1409,76 +1388,19 @@ class DownloadAddedNotify(_PluginBase):
         info = cls._parse_release_name(value)
         if not info:
             return None
-        lines = []
-        cls._append_release_line(lines, "🔹名称", cls._format_release_summary(info))
-        cls._append_release_line(lines, "🔹 中文剧名", info.get("title_zh"))
-        cls._append_release_line(lines, "🔹 英文剧名", info.get("title_en"))
-        season_text = cls._format_release_season_episode(info, value, episode)
-        cls._append_release_line(lines, "🔹 季度集数", season_text)
-        cls._append_release_line(lines, "🔹 分辨率", info.get("resolution"))
-        cls._append_release_line(lines, "🔹 资源来源", info.get("source"))
-        codec_text = info.get("codec")
-        codec_details = " / ".join(item for item in (info.get("quality"), info.get("fps")) if item)
-        if codec_text and codec_details:
-            codec_text = f"{codec_text} ({codec_details})"
-        cls._append_release_line(lines, "🔹 视频编码", codec_text)
-        cls._append_release_line(lines, "🔹 音频规格", info.get("audio"))
-        cls._append_release_line(lines, "🔹 发布小组", info.get("group"))
-        return "\n".join(lines) if lines else None
-
-    @staticmethod
-    def _format_release_summary(info: Dict[str, str]) -> Optional[str]:
         title = info.get("title_zh") or info.get("title_en")
-        if not title:
-            return None
-        summary = f"【{title}】"
-        parts = []
-        if info.get("season"):
-            parts.append(info["season"])
-        quality_parts = [item for item in (info.get("resolution"), info.get("fps")) if item]
-        if quality_parts:
-            parts.append(" ".join(quality_parts))
-        audio_group = info.get("audio")
-        if audio_group and info.get("group"):
-            audio_group = f"{audio_group} - {info['group']}"
-        elif info.get("group"):
-            audio_group = info["group"]
-        if audio_group:
-            parts.append(audio_group)
-        if parts:
-            summary = f"{summary}| {' | '.join(parts)}"
-        return summary
+        quality = " ".join(item for item in (info.get("resolution"), info.get("fps")) if item)
+        audio = cls._format_release_audio(info.get("audio"))
+        parts = [part for part in (title, quality, audio, info.get("group")) if part]
+        return " | ".join(parts) or None
 
     @staticmethod
-    def _append_release_line(lines: List[str], label: str, value: Any):
-        if value:
-            if label == "🔹名称":
-                lines.append(f"{label}：{value}")
-                return
-            label_width = DownloadAddedNotify._display_width(label)
-            padding = " " * max(0, 9 - label_width)
-            lines.append(f"{label}{padding}: {value}")
-
-    @classmethod
-    def _format_release_season_episode(
-        cls, info: Dict[str, str], source: Any, fallback_episode: Any = None
-    ) -> Optional[str]:
-        season = info.get("season")
-        episode = (
-            f"E{int(info['episode']):02d}"
-            if info.get("episode")
-            else cls._format_episode_text(fallback_episode) or cls._extract_episode(source)
-        )
-        if season and episode:
-            match = re.match(r"^S\d{2}E(\d{2,3})$", episode, re.IGNORECASE)
-            if match:
-                episode = f"E{match.group(1)}"
-            text = f"{season} {episode}"
-        else:
-            text = season or episode
-        if text and info.get("year"):
-            text = f"{text} ({info.get('year')}年)"
-        return text
+    def _format_release_audio(value: Any) -> Optional[str]:
+        if not value:
+            return None
+        text = str(value).strip()
+        match = re.match(r"^(DTS\d(?:\.\d)?|DDP?\d(?:\.\d)?|AAC|AC3)", text, re.IGNORECASE)
+        return match.group(1) if match else text
 
     @classmethod
     def _parse_release_name(cls, value: Any) -> Optional[Dict[str, str]]:
