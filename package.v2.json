@@ -2,12 +2,13 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.0.15",
+    "version": "0.0.16",
     "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png",
     "author": "jardy",
     "level": 0,
     "v2": true,
     "history": {
+      "v0.0.16": "精简通知标题和名称展示，去掉来源字段并清理 tracker 站点前缀",
       "v0.0.15": "大小统一显示为 GB，并增加可配置的推送头图 URL",
       "v0.0.14": "优化通知为卡片式字段排版，增加时间、质量和做种信息展示",
       "v0.0.13": "美化通知正文格式，统一字段顺序并中文化 qBittorrent 状态",

@@ -48,7 +48,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.15"
+    plugin_version = "0.0.16"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -161,6 +161,8 @@ class DownloadAddedNotify(_PluginBase):
         media_text = media_title
         if media_text and year:
             media_text = f"{media_text} ({year})"
+        display_title = self._display_title(title, media_text, year)
+        compact_name = self._compact_name(title)
         lines = self._message_lines(
             ("时间", self._now_text()),
             ("媒体", media_text),
@@ -170,7 +172,7 @@ class DownloadAddedNotify(_PluginBase):
             ("做种", seeders),
             ("分类", category),
             ("标签", tags),
-            ("名称", title),
+            ("名称", compact_name),
             ("描述", description),
             ("下载器", downloader),
             ("目录", save_path),
@@ -185,13 +187,13 @@ class DownloadAddedNotify(_PluginBase):
 
         try:
             self._post_notification(
-                title=f"{self._title_prefix} {title}",
+                title=display_title,
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送下载添加通知 - {title}")
         except TypeError:
             self._post_notification(
-                title=f"{self._title_prefix} {title}",
+                title=display_title,
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送下载添加通知 - {title}")
@@ -230,7 +232,7 @@ class DownloadAddedNotify(_PluginBase):
 
         lines = self._message_lines(
             ("时间", self._now_text()),
-            ("名称", title),
+            ("名称", self._compact_name(title)),
             ("下载器", downloader),
             ("源文件", source_path),
             ("入库位置", target_path),
@@ -245,13 +247,13 @@ class DownloadAddedNotify(_PluginBase):
 
         try:
             self._post_notification(
-                title=f"{self._complete_title_prefix} {title}",
+                title=self._display_title(title),
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送下载完成通知 - {title}")
         except TypeError:
             self._post_notification(
-                title=f"{self._complete_title_prefix} {title}",
+                title=self._display_title(title),
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送下载完成通知 - {title}")
@@ -325,10 +327,10 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(torrent_data, "total_size", "size"))
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
+        display_title = self._display_title(title)
 
         lines = self._message_lines(
             ("时间", self._now_text()),
-            ("来源", "qBittorrent 轮询"),
             ("站点", site),
             ("状态", self._format_qb_state(state)),
             ("质量", quality),
@@ -336,7 +338,7 @@ class DownloadAddedNotify(_PluginBase):
             ("做种", seeders),
             ("分类", category),
             ("标签", tags),
-            ("名称", title),
+            ("名称", self._compact_name(title)),
             ("下载器", downloader),
             ("目录", save_path),
         )
@@ -350,13 +352,13 @@ class DownloadAddedNotify(_PluginBase):
 
         try:
             self._post_notification(
-                title=f"{self._title_prefix} {title}",
+                title=display_title,
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送 Qbittorrent 新任务通知 - {title}")
         except TypeError:
             self._post_notification(
-                title=f"{self._title_prefix} {title}",
+                title=display_title,
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送 Qbittorrent 新任务通知 - {title}")
@@ -386,10 +388,9 @@ class DownloadAddedNotify(_PluginBase):
         seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
 
         event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
-        prefix = self._complete_title_prefix if event in ("completed", "finished", "done") else self._title_prefix
+        display_title = self._display_title(title)
         lines = self._message_lines(
             ("时间", self._now_text()),
-            ("来源", "qBittorrent 外部程序"),
             ("事件", event_name),
             ("站点", site),
             ("状态", self._format_qb_state(state)),
@@ -398,7 +399,7 @@ class DownloadAddedNotify(_PluginBase):
             ("做种", seeders),
             ("分类", category),
             ("标签", tags),
-            ("名称", title),
+            ("名称", self._compact_name(title)),
             ("下载器", downloader),
             ("目录", save_path),
         )
@@ -411,7 +412,7 @@ class DownloadAddedNotify(_PluginBase):
                 lines.append(f"- {key}: {value}")
 
         self._post_notification(
-            title=f"{prefix} {title}",
+            title=display_title,
             text="\n".join(lines),
         )
         logger.info(f"{self.plugin_name}: 已接收 Qbittorrent 外部程序通知 - {event}: {title}")
@@ -840,6 +841,37 @@ class DownloadAddedNotify(_PluginBase):
             return None
         return " ".join(text.splitlines())
 
+    @classmethod
+    def _display_title(cls, title: Any, media_title: Any = None, year: Any = None) -> str:
+        media_text = cls._clean_message_value(media_title)
+        if media_text:
+            return media_text
+
+        text = cls._clean_message_value(title) or "未知任务"
+        text = re.sub(
+            r"\b(2160p|1080p|720p|480p|WEB-?DL|WEBRip|BluRay|BDRip|HDTV|DVDRip|"
+            r"DDP?\d(?:\.\d)?|DTS|AAC|AC3|H\.?265|H\.?264|HEVC|AVC|x265|x264|"
+            r"HDR10\+?|DoVi|DV|SDR).*$",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(r"[-._]+$", "", text).strip()
+        text = re.sub(r"[._]+", " ", text)
+        if year and str(year) not in text:
+            text = f"{text} ({year})"
+        return cls._compact_name(text, 48) or "未知任务"
+
+    @classmethod
+    def _compact_name(cls, value: Any, max_len: int = 96) -> Optional[str]:
+        text = cls._clean_message_value(value)
+        if not text:
+            return None
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) <= max_len:
+            return text
+        return f"{text[:max_len - 3].rstrip()}..."
+
     @staticmethod
     def _format_qb_state(state: Any) -> Optional[str]:
         if state in (None, ""):
@@ -903,6 +935,9 @@ class DownloadAddedNotify(_PluginBase):
             host = host.rsplit("@", 1)[-1]
         if ":" in host:
             host = host.split(":", 1)[0]
+        if "/" in host:
+            host = host.split("/", 1)[0]
+        host = re.sub(r"^(tracker|announce|tr)[-_.]?\d*[-_.]+", "", host, flags=re.IGNORECASE)
         return host or text
 
     @staticmethod
