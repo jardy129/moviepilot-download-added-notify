@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.6"
+    plugin_version = "0.1.7"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1027,19 +1027,51 @@ class DownloadAddedNotify(_PluginBase):
         return lines
 
     @staticmethod
-    def _format_wrapped_line(label: str, text: str, max_width: int = 30) -> str:
+    def _format_wrapped_line(label: str, text: str, max_width: int = 36) -> str:
         prefix = f"{label}： "
-        if len(text) <= max_width:
+        if DownloadAddedNotify._display_width(text) <= max_width:
             return f"{prefix}{text}"
         indent = " " * len(prefix)
-        chunks = []
-        current = text
-        while len(current) > max_width:
-            chunks.append(current[:max_width])
-            current = current[max_width:]
-        if current:
-            chunks.append(current)
+        chunks = DownloadAddedNotify._wrap_text_by_width(text, max_width)
         return prefix + ("\n" + indent).join(chunks)
+
+    @staticmethod
+    def _wrap_text_by_width(text: str, max_width: int) -> List[str]:
+        chunks = []
+        current = text.strip()
+        while current:
+            if DownloadAddedNotify._display_width(current) <= max_width:
+                chunks.append(current)
+                break
+            split_at = DownloadAddedNotify._best_wrap_index(current, max_width)
+            chunks.append(current[:split_at].rstrip(" ._-"))
+            current = current[split_at:].lstrip(" ._-")
+        return [chunk for chunk in chunks if chunk]
+
+    @staticmethod
+    def _best_wrap_index(text: str, max_width: int) -> int:
+        width = 0
+        hard_limit = 0
+        best = 0
+        for index, char in enumerate(text):
+            char_width = DownloadAddedNotify._char_display_width(char)
+            if width + char_width > max_width:
+                break
+            width += char_width
+            hard_limit = index + 1
+            if char in (" ", ".", "-", "_", "·", "、"):
+                best = index + 1
+        if best >= max(8, hard_limit * 2 // 3):
+            return best
+        return max(hard_limit, 1)
+
+    @staticmethod
+    def _display_width(text: str) -> int:
+        return sum(DownloadAddedNotify._char_display_width(char) for char in text)
+
+    @staticmethod
+    def _char_display_width(char: str) -> int:
+        return 2 if re.match(r"[\u4e00-\u9fff\uff00-\uffef]", char) else 1
 
     @classmethod
     def _clean_message_value(cls, value: Any) -> Optional[str]:
