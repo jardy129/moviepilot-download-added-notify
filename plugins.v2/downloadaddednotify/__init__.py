@@ -48,7 +48,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.16"
+    plugin_version = "0.0.17"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -70,6 +70,23 @@ class DownloadAddedNotify(_PluginBase):
     _moviepilot_base_url = "http://moviepilot:3001"
     _qb_downloader_name = "Qbittorrent"
     _header_image_url = ""
+    _label_icons = {
+        "时间": "🕒",
+        "媒体": "🎬",
+        "类别": "🎭",
+        "分类": "🎭",
+        "站点": "🌐",
+        "质量": "🌟",
+        "大小": "💾",
+        "做种": "🌱",
+        "标签": "🏷",
+        "名称": "📛",
+        "描述": "📝",
+        "下载器": "⬇️",
+        "目录": "📁",
+        "状态": "📌",
+        "事件": "🔔",
+    }
 
     def init_plugin(self, config: Optional[dict] = None):
         if not config:
@@ -154,14 +171,19 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(self._to_dict(torrent_info), "size"))
         quality = self._first_value(self._to_dict(torrent_info), "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(self._to_dict(torrent_info), "seeders", "seeds", "num_seeds"))
-        description = self._first_value(self._to_dict(torrent_info), "description", "descr", "subtitle")
+        subtitle = self._first_value(self._to_dict(torrent_info), "subtitle", "sub_title")
+        description = self._build_description(
+            title,
+            self._first_value(self._to_dict(torrent_info), "description", "descr"),
+            subtitle,
+        )
         media_title = self._media_title(media_info)
         year = self._first_value(self._to_dict(media_info), "year") or self._first_value(self._to_dict(meta_info), "year")
 
         media_text = media_title
         if media_text and year:
             media_text = f"{media_text} ({year})"
-        display_title = self._display_title(title, media_text, year)
+        display_title = self._display_title(title, media_text, year, "开始下载")
         compact_name = self._compact_name(title)
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -170,7 +192,7 @@ class DownloadAddedNotify(_PluginBase):
             ("质量", quality),
             ("大小", size),
             ("做种", seeders),
-            ("分类", category),
+            ("类别", category),
             ("标签", tags),
             ("名称", compact_name),
             ("描述", description),
@@ -247,13 +269,13 @@ class DownloadAddedNotify(_PluginBase):
 
         try:
             self._post_notification(
-                title=self._display_title(title),
+                title=self._display_title(title, event_text="下载完成"),
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送下载完成通知 - {title}")
         except TypeError:
             self._post_notification(
-                title=self._display_title(title),
+                title=self._display_title(title, event_text="下载完成"),
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送下载完成通知 - {title}")
@@ -327,7 +349,8 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(torrent_data, "total_size", "size"))
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
-        display_title = self._display_title(title)
+        display_title = self._display_title(title, event_text="开始下载")
+        description = self._build_description(title, self._first_value(torrent_data, "description", "subtitle"))
 
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -336,9 +359,10 @@ class DownloadAddedNotify(_PluginBase):
             ("质量", quality),
             ("大小", size),
             ("做种", seeders),
-            ("分类", category),
+            ("类别", category),
             ("标签", tags),
             ("名称", self._compact_name(title)),
+            ("描述", description),
             ("下载器", downloader),
             ("目录", save_path),
         )
@@ -386,9 +410,17 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(payload, "size", "total_size"))
         quality = self._first_value(payload, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
+        description = self._build_description(
+            title,
+            self._first_value(payload, "description", "descr"),
+            self._first_value(payload, "subtitle", "sub_title"),
+        )
 
         event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
-        display_title = self._display_title(title)
+        display_title = self._display_title(
+            title,
+            event_text="下载完成" if event in ("completed", "finished", "done") else "开始下载",
+        )
         lines = self._message_lines(
             ("时间", self._now_text()),
             ("事件", event_name),
@@ -397,9 +429,10 @@ class DownloadAddedNotify(_PluginBase):
             ("质量", quality),
             ("大小", size),
             ("做种", seeders),
-            ("分类", category),
+            ("类别", category),
             ("标签", tags),
             ("名称", self._compact_name(title)),
+            ("描述", description),
             ("下载器", downloader),
             ("目录", save_path),
         )
@@ -829,7 +862,9 @@ class DownloadAddedNotify(_PluginBase):
         for label, value in items:
             text = cls._clean_message_value(value)
             if text:
-                lines.append(f"{label}：{text}")
+                icon = cls._label_icons.get(label)
+                label_text = f"{icon} {label}" if icon else label
+                lines.append(f"{label_text}： {text}")
         return lines
 
     @classmethod
@@ -842,10 +877,18 @@ class DownloadAddedNotify(_PluginBase):
         return " ".join(text.splitlines())
 
     @classmethod
-    def _display_title(cls, title: Any, media_title: Any = None, year: Any = None) -> str:
+    def _display_title(
+        cls,
+        title: Any,
+        media_title: Any = None,
+        year: Any = None,
+        event_text: Optional[str] = None,
+    ) -> str:
         media_text = cls._clean_message_value(media_title)
+        episode = cls._extract_episode(title)
         if media_text:
-            return media_text
+            base = cls._ensure_title_year(media_text, year or cls._extract_year(title))
+            return cls._join_title_parts(base, episode, event_text)
 
         text = cls._clean_message_value(title) or "未知任务"
         text = re.sub(
@@ -858,9 +901,69 @@ class DownloadAddedNotify(_PluginBase):
         )
         text = re.sub(r"[-._]+$", "", text).strip()
         text = re.sub(r"[._]+", " ", text)
-        if year and str(year) not in text:
-            text = f"{text} ({year})"
-        return cls._compact_name(text, 48) or "未知任务"
+        title_year = year or cls._extract_year(text)
+        if episode:
+            text = re.sub(r"\bS\d{1,2}E\d{1,3}\b", "", text, flags=re.IGNORECASE).strip()
+            text = re.sub(r"\b第\s*\d+\s*[集话话]\b", "", text).strip()
+        if title_year:
+            text = re.sub(rf"\b{re.escape(str(title_year))}\b", "", text).strip()
+        text = re.sub(r"[-._]+$", "", text).strip()
+        text = re.sub(r"\s+", " ", text)
+        base = cls._ensure_title_year(text or "未知任务", title_year)
+        return cls._join_title_parts(base, episode, event_text)
+
+    @classmethod
+    def _ensure_title_year(cls, title: Any, year: Any = None) -> str:
+        text = cls._clean_message_value(title) or "未知任务"
+        if re.search(r"\(\d{4}\)", text):
+            return text
+        title_year = year or cls._extract_year(text)
+        if title_year:
+            text = re.sub(rf"\b{re.escape(str(title_year))}\b", "", text).strip()
+            text = re.sub(r"[-._]+$", "", text).strip()
+            return f"{text} ({title_year})"
+        return text
+
+    @classmethod
+    def _join_title_parts(cls, title: str, episode: Optional[str], event_text: Optional[str]) -> str:
+        parts = [title]
+        if episode:
+            parts.append(episode)
+        if event_text:
+            parts.append(event_text)
+        return cls._compact_name(" ".join(parts), 64) or "未知任务"
+
+    @staticmethod
+    def _extract_year(value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        match = re.search(r"\b(19\d{2}|20\d{2})\b", str(value))
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _extract_episode(value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        text = str(value)
+        match = re.search(r"\bS\d{1,2}E\d{1,3}\b", text, re.IGNORECASE)
+        if match:
+            return match.group(0).upper()
+        match = re.search(r"第\s*(\d+)\s*[集话话]", text)
+        if match:
+            return f"第{match.group(1)}集"
+        return None
+
+    @classmethod
+    def _build_description(cls, title: Any, *parts: Any) -> Optional[str]:
+        values = []
+        for item in parts:
+            text = cls._clean_message_value(item)
+            if text and text not in values:
+                values.append(text)
+        title_text = cls._compact_name(title, 120)
+        if title_text and title_text not in values:
+            values.append(title_text)
+        return " | ".join(values) if values else None
 
     @classmethod
     def _compact_name(cls, value: Any, max_len: int = 96) -> Optional[str]:
