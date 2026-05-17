@@ -48,7 +48,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.14"
+    plugin_version = "0.0.15"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -69,6 +69,7 @@ class DownloadAddedNotify(_PluginBase):
     _external_notify_token = ""
     _moviepilot_base_url = "http://moviepilot:3001"
     _qb_downloader_name = "Qbittorrent"
+    _header_image_url = ""
 
     def init_plugin(self, config: Optional[dict] = None):
         if not config:
@@ -87,6 +88,7 @@ class DownloadAddedNotify(_PluginBase):
         self._external_notify_token = (config.get("external_notify_token") or "").strip()
         self._moviepilot_base_url = (config.get("moviepilot_base_url") or "http://moviepilot:3001").strip()
         self._qb_downloader_name = (config.get("qb_downloader_name") or "Qbittorrent").strip()
+        self._header_image_url = (config.get("header_image_url") or "").strip()
         if not self._external_notify_token:
             self._external_notify_token = secrets.token_urlsafe(24)
             config["external_notify_token"] = self._external_notify_token
@@ -149,7 +151,7 @@ class DownloadAddedNotify(_PluginBase):
             or self._first_value(self._to_dict(media_info), "category", "type")
         )
         tags = self._first_value(data, "tags", "tag")
-        size = self._format_size_mb(self._first_raw_value(self._to_dict(torrent_info), "size"))
+        size = self._format_size_gb(self._first_raw_value(self._to_dict(torrent_info), "size"))
         quality = self._first_value(self._to_dict(torrent_info), "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(self._to_dict(torrent_info), "seeders", "seeds", "num_seeds"))
         description = self._first_value(self._to_dict(torrent_info), "description", "descr", "subtitle")
@@ -182,14 +184,13 @@ class DownloadAddedNotify(_PluginBase):
                 lines.append(f"- {key}: {value}")
 
         try:
-            self.post_message(
-                mtype=self._notification_type(),
+            self._post_notification(
                 title=f"{self._title_prefix} {title}",
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送下载添加通知 - {title}")
         except TypeError:
-            self.post_message(
+            self._post_notification(
                 title=f"{self._title_prefix} {title}",
                 text="\n".join(lines),
             )
@@ -243,14 +244,13 @@ class DownloadAddedNotify(_PluginBase):
                 lines.append(f"- {key}: {value}")
 
         try:
-            self.post_message(
-                mtype=self._notification_type(),
+            self._post_notification(
                 title=f"{self._complete_title_prefix} {title}",
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送下载完成通知 - {title}")
         except TypeError:
-            self.post_message(
+            self._post_notification(
                 title=f"{self._complete_title_prefix} {title}",
                 text="\n".join(lines),
             )
@@ -322,7 +322,7 @@ class DownloadAddedNotify(_PluginBase):
         tags = self._first_value(torrent_data, "tags")
         state = self._first_value(torrent_data, "state")
         site = self._format_site(self._first_value(torrent_data, "tracker", "tracker_host", "site", "site_name"))
-        size = self._format_size_mb(self._first_raw_value(torrent_data, "total_size", "size"))
+        size = self._format_size_gb(self._first_raw_value(torrent_data, "total_size", "size"))
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
 
@@ -349,14 +349,13 @@ class DownloadAddedNotify(_PluginBase):
                 lines.append(f"- {key}: {value}")
 
         try:
-            self.post_message(
-                mtype=self._notification_type(),
+            self._post_notification(
                 title=f"{self._title_prefix} {title}",
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送 Qbittorrent 新任务通知 - {title}")
         except TypeError:
-            self.post_message(
+            self._post_notification(
                 title=f"{self._title_prefix} {title}",
                 text="\n".join(lines),
             )
@@ -382,7 +381,7 @@ class DownloadAddedNotify(_PluginBase):
         tags = self._first_value(payload, "tags")
         state = self._first_value(payload, "state")
         site = self._format_site(self._first_value(payload, "tracker", "site", "site_name"))
-        size = self._format_size_mb(self._first_raw_value(payload, "size", "total_size"))
+        size = self._format_size_gb(self._first_raw_value(payload, "size", "total_size"))
         quality = self._first_value(payload, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
 
@@ -411,8 +410,7 @@ class DownloadAddedNotify(_PluginBase):
                     continue
                 lines.append(f"- {key}: {value}")
 
-        self.post_message(
-            mtype=self._notification_type(),
+        self._post_notification(
             title=f"{prefix} {title}",
             text="\n".join(lines),
         )
@@ -550,6 +548,20 @@ class DownloadAddedNotify(_PluginBase):
                                 "props": {"cols": 12},
                                 "content": [
                                     {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "header_image_url",
+                                            "label": "推送头图 URL",
+                                            "placeholder": "填写图片直链，留空则不推送头图",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
                                         "component": "VSwitch",
                                         "props": {
                                             "model": "include_raw_summary",
@@ -664,6 +676,7 @@ class DownloadAddedNotify(_PluginBase):
             "external_notify_token": "",
             "moviepilot_base_url": "http://moviepilot:3001",
             "qb_downloader_name": "Qbittorrent",
+            "header_image_url": "",
             "qb_added_command": "",
             "qb_completed_command": "",
         }
@@ -719,6 +732,24 @@ class DownloadAddedNotify(_PluginBase):
     @staticmethod
     def _now_text() -> str:
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _post_notification(self, title: str, text: str):
+        kwargs = {
+            "mtype": self._notification_type(),
+            "title": title,
+            "text": text,
+        }
+        if self._header_image_url:
+            kwargs["image"] = self._header_image_url
+        try:
+            self.post_message(**kwargs)
+        except TypeError:
+            kwargs.pop("image", None)
+            try:
+                self.post_message(**kwargs)
+            except TypeError:
+                kwargs.pop("mtype", None)
+                self.post_message(**kwargs)
 
     @staticmethod
     def _raise_http_error(status_code: int, detail: str):
@@ -887,21 +918,55 @@ class DownloadAddedNotify(_PluginBase):
         return str(number)
 
     @staticmethod
-    def _format_size_mb(value: Any) -> Optional[str]:
+    def _format_size_gb(value: Any) -> Optional[str]:
         if value in (None, ""):
             return None
+        if isinstance(value, str):
+            formatted = DownloadAddedNotify._parse_size_string_to_gb(value)
+            if formatted:
+                return formatted
         try:
             size = float(value)
         except (TypeError, ValueError):
             return str(value)
         if size <= 0:
             return None
-        mb = size / 1024 / 1024
-        if mb >= 100:
-            return f"{mb:.0f} MB"
-        if mb >= 10:
-            return f"{mb:.1f} MB"
-        return f"{mb:.2f} MB"
+        return DownloadAddedNotify._format_gb_number(size / 1024 / 1024 / 1024)
+
+    @classmethod
+    def _parse_size_string_to_gb(cls, value: str) -> Optional[str]:
+        text = value.strip()
+        match = re.search(r"([\d.]+)\s*([KMGT]?I?B?|[KMGT])", text, re.IGNORECASE)
+        if not match:
+            return None
+        try:
+            number = float(match.group(1))
+        except (TypeError, ValueError):
+            return None
+        unit = match.group(2).upper()
+        if unit in ("", "B"):
+            gb = number / 1024 / 1024 / 1024
+        elif unit in ("K", "KB", "KIB"):
+            gb = number / 1024 / 1024
+        elif unit in ("M", "MB", "MIB"):
+            gb = number / 1024
+        elif unit in ("G", "GB", "GIB"):
+            gb = number
+        elif unit in ("T", "TB", "TIB"):
+            gb = number * 1024
+        else:
+            return None
+        return cls._format_gb_number(gb)
+
+    @staticmethod
+    def _format_gb_number(gb: float) -> Optional[str]:
+        if gb <= 0:
+            return None
+        if gb >= 100:
+            return f"{gb:.0f} GB"
+        if gb >= 10:
+            return f"{gb:.1f} GB"
+        return f"{max(gb, 0.01):.2f} GB"
 
     @staticmethod
     def _safe_int(value: Any, default: int, minimum: int) -> int:
