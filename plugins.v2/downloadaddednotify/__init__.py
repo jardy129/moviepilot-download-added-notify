@@ -3,7 +3,8 @@ import re
 import secrets
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
+from urllib.request import Request as UrlRequest, urlopen
 
 from app.plugins import _PluginBase
 
@@ -49,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.2"
+    plugin_version = "0.1.3"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -71,6 +72,11 @@ class DownloadAddedNotify(_PluginBase):
     _moviepilot_base_url = "http://moviepilot:3001"
     _qb_downloader_name = "Qbittorrent"
     _header_image_url = ""
+    _qb_auto_tag_enabled = True
+    _qb_web_url = ""
+    _qb_username = ""
+    _qb_password = ""
+    _qb_tag_name = "MOVIEPILOT"
     _video_extensions = {
         ".mkv",
         ".mp4",
@@ -117,6 +123,11 @@ class DownloadAddedNotify(_PluginBase):
         self._moviepilot_base_url = (config.get("moviepilot_base_url") or "http://moviepilot:3001").strip()
         self._qb_downloader_name = (config.get("qb_downloader_name") or "Qbittorrent").strip()
         self._header_image_url = (config.get("header_image_url") or "").strip()
+        self._qb_auto_tag_enabled = bool(config.get("qb_auto_tag_enabled", True))
+        self._qb_web_url = (config.get("qb_web_url") or "").strip()
+        self._qb_username = (config.get("qb_username") or "").strip()
+        self._qb_password = (config.get("qb_password") or "").strip()
+        self._qb_tag_name = (config.get("qb_tag_name") or "MOVIEPILOT").strip()
         if not self._external_notify_token:
             self._external_notify_token = secrets.token_urlsafe(24)
             config["external_notify_token"] = self._external_notify_token
@@ -136,6 +147,8 @@ class DownloadAddedNotify(_PluginBase):
             or config.get("qb_downloader_name") != saved_config.get("qb_downloader_name")
             or config.get("qb_added_command") != saved_config.get("qb_added_command")
             or config.get("qb_completed_command") != saved_config.get("qb_completed_command")
+            or "qb_auto_tag_enabled" not in saved_config
+            or "qb_tag_name" not in saved_config
         ):
             self.update_config(config)
 
@@ -395,12 +408,14 @@ class DownloadAddedNotify(_PluginBase):
                 title=display_title,
                 text="\n".join(lines),
             )
+            self._add_qb_tag(self._first_value(torrent_data, "hash", "info_hash"))
             logger.info(f"{self.plugin_name}: 已发送 Qbittorrent 新任务通知 - {title}")
         except TypeError:
             self._post_notification(
                 title=display_title,
                 text="\n".join(lines),
             )
+            self._add_qb_tag(self._first_value(torrent_data, "hash", "info_hash"))
             logger.info(f"{self.plugin_name}: 已发送 Qbittorrent 新任务通知 - {title}")
         except Exception as err:
             logger.error(f"{self.plugin_name}: 发送 Qbittorrent 新任务通知失败 - {err}", exc_info=True)
@@ -465,6 +480,8 @@ class DownloadAddedNotify(_PluginBase):
             title=display_title,
             text="\n".join(lines),
         )
+        if event not in ("completed", "finished", "done"):
+            self._add_qb_tag(self._first_value(payload, "hash", "info_hash"))
         logger.info(f"{self.plugin_name}: 已接收 Qbittorrent 外部程序通知 - {event}: {title}")
         return {"success": True, "message": "ok"}
 
@@ -485,6 +502,75 @@ class DownloadAddedNotify(_PluginBase):
                                         "props": {
                                             "model": "enabled",
                                             "label": "启用插件",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VSwitch",
+                                        "props": {
+                                            "model": "qb_auto_tag_enabled",
+                                            "label": "自动给 qBittorrent 任务打标签",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "qb_tag_name",
+                                            "label": "自动标签名称",
+                                            "placeholder": "MOVIEPILOT",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "qb_web_url",
+                                            "label": "qBittorrent Web 地址",
+                                            "placeholder": "http://192.168.2.118:8080",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "qb_username",
+                                            "label": "qBittorrent 用户名",
+                                            "placeholder": "admin",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 4},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "qb_password",
+                                            "label": "qBittorrent 密码",
+                                            "type": "password",
                                         },
                                     }
                                 ],
@@ -728,6 +814,11 @@ class DownloadAddedNotify(_PluginBase):
             "moviepilot_base_url": "http://moviepilot:3001",
             "qb_downloader_name": "Qbittorrent",
             "header_image_url": "",
+            "qb_auto_tag_enabled": True,
+            "qb_web_url": "",
+            "qb_username": "",
+            "qb_password": "",
+            "qb_tag_name": "MOVIEPILOT",
             "qb_added_command": "",
             "qb_completed_command": "",
         }
@@ -801,6 +892,53 @@ class DownloadAddedNotify(_PluginBase):
             except TypeError:
                 kwargs.pop("mtype", None)
                 self.post_message(**kwargs)
+
+    def _add_qb_tag(self, torrent_hash: Optional[str]):
+        if not self._qb_auto_tag_enabled:
+            return
+        if not torrent_hash:
+            logger.warn(f"{self.plugin_name}: 未获取到 Info Hash，跳过自动打标签")
+            return
+        if not self._qb_web_url or not self._qb_username or not self._qb_password:
+            logger.warn(f"{self.plugin_name}: qBittorrent Web API 配置不完整，跳过自动打标签")
+            return
+
+        base_url = self._qb_web_url.rstrip("/")
+        tag_name = self._qb_tag_name or "MOVIEPILOT"
+        try:
+            login_data = urlencode({
+                "username": self._qb_username,
+                "password": self._qb_password,
+            }).encode()
+            login_request = UrlRequest(
+                f"{base_url}/api/v2/auth/login",
+                data=login_data,
+                method="POST",
+            )
+            with urlopen(login_request, timeout=10) as response:
+                cookie = response.headers.get("Set-Cookie", "").split(";", 1)[0]
+                login_body = response.read().decode(errors="ignore").strip()
+
+            if not cookie or login_body.lower().startswith("fails"):
+                logger.error(f"{self.plugin_name}: qBittorrent 登录失败，无法自动打标签")
+                return
+
+            tag_data = urlencode({
+                "hashes": torrent_hash,
+                "tags": tag_name,
+            }).encode()
+            tag_request = UrlRequest(
+                f"{base_url}/api/v2/torrents/addTags",
+                data=tag_data,
+                headers={"Cookie": cookie},
+                method="POST",
+            )
+            with urlopen(tag_request, timeout=10) as response:
+                response.read()
+
+            logger.info(f"{self.plugin_name}: 已尝试为 {torrent_hash} 添加 qBittorrent 标签 {tag_name}")
+        except Exception as err:
+            logger.error(f"{self.plugin_name}: 自动添加 qBittorrent 标签失败 - {err}", exc_info=True)
 
     @staticmethod
     def _raise_http_error(status_code: int, detail: str):
