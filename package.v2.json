@@ -2,13 +2,14 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.1.10",
+    "version": "0.1.11",
     "icon": "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png",
     "author": "jardy",
     "author_url": "https://github.com/jardy129/",
     "level": 0,
     "v2": true,
     "history": {
+      "v0.1.11": "在插件详情页提供可编辑配置项，便于直接填写 qBittorrent 和通知设置",
       "v0.1.10": "修复轮询 Qbittorrent 手动添加任务时的通知变量引用错误",
       "v0.1.9": "优化下载通知标题和名称详情格式，支持从下载文件补齐剧集集数并对齐发布信息字段",
       "v0.1.8": "按发布命名结构解析标题和名称，优先中文标题并优化名称断句",

@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.10"
+    plugin_version = "0.1.11"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -857,7 +857,140 @@ class DownloadAddedNotify(_PluginBase):
         ]
 
     def get_page(self) -> Optional[List[dict]]:
-        return None
+        return [
+            {
+                "component": "VForm",
+                "content": [
+                    {
+                        "component": "VRow",
+                        "content": [
+                            self._page_switch("enabled", "启用插件", self._enabled, 4),
+                            self._page_switch(
+                                "qb_poll_enabled",
+                                "轮询 Qbittorrent 手动添加任务",
+                                self._qb_poll_enabled,
+                                4,
+                            ),
+                            self._page_switch(
+                                "qb_auto_tag_enabled",
+                                "自动给任务打标签",
+                                self._qb_auto_tag_enabled,
+                                4,
+                            ),
+                            self._page_text("qb_web_url", "qBittorrent Web 地址", self._qb_web_url, 6),
+                            self._page_text("qb_username", "qBittorrent 用户名", self._qb_username, 3),
+                            self._page_text("qb_password", "qBittorrent 密码", self._qb_password, 3, "password"),
+                            self._page_text("qb_tag_name", "自动标签名称", self._qb_tag_name, 3),
+                            self._page_text("moviepilot_base_url", "MoviePilot 地址", self._moviepilot_base_url, 6),
+                            self._page_text("qb_downloader_name", "下载器名称", self._qb_downloader_name, 3),
+                            self._page_text("qb_poll_interval", "轮询间隔（秒）", self._qb_poll_interval, 3),
+                            self._page_text("notify_stage", "通知时机", self._format_notify_stage(), 3),
+                            self._page_text("notify_type", "通知类型", self._notify_type, 3),
+                            self._page_text("only_downloader", "只通知下载器", self._only_downloader or "全部", 3),
+                            self._page_text("header_image_url", "推送头图 URL", self._header_image_url or "未设置", 3),
+                            self._page_switch(
+                                "external_notify_enabled",
+                                "外部程序通知接口",
+                                self._external_notify_enabled,
+                                4,
+                            ),
+                            self._page_text("external_notify_token", "外部通知 Token", self._external_notify_token, 8),
+                            self._page_textarea(
+                                "qb_added_command",
+                                "qBittorrent 添加种子时运行外部程序",
+                                self._build_qb_command("added"),
+                                True,
+                            ),
+                            self._page_textarea(
+                                "qb_completed_command",
+                                "qBittorrent 完成下载时运行外部程序",
+                                self._build_qb_command("completed"),
+                                True,
+                            ),
+                        ],
+                    }
+                ],
+            }
+        ]
+
+    @staticmethod
+    def _page_col(content: dict, md: int = 6) -> dict:
+        return {
+            "component": "VCol",
+            "props": {"cols": 12, "md": md},
+            "content": [content],
+        }
+
+    @classmethod
+    def _page_switch(cls, model: str, label: str, value: bool, md: int = 4) -> dict:
+        return cls._page_col(
+            {
+                "component": "VSwitch",
+                "props": {
+                    "model": model,
+                    "label": label,
+                    "model-value": bool(value),
+                },
+            },
+            md,
+        )
+
+    @classmethod
+    def _page_text(cls, model: str, label: str, value: Any, md: int = 6, field_type: Optional[str] = None) -> dict:
+        props = {
+            "model": model,
+            "label": label,
+            "model-value": cls._display_page_value(value),
+        }
+        if field_type:
+            props["type"] = field_type
+        return cls._page_col(
+            {
+                "component": "VTextField",
+                "props": props,
+            },
+            md,
+        )
+
+    @classmethod
+    def _page_textarea(cls, model: str, label: str, value: Any, readonly: bool = False) -> dict:
+        props = {
+            "model": model,
+            "label": label,
+            "model-value": cls._display_page_value(value),
+            "rows": 2,
+            "auto-grow": True,
+        }
+        if readonly:
+            props["readonly"] = True
+        return cls._page_col(
+            {
+                "component": "VTextarea",
+                "props": props,
+            },
+            12,
+        )
+
+    @staticmethod
+    def _display_page_value(value: Any) -> str:
+        if value in (None, ""):
+            return ""
+        return str(value)
+
+    def _mask_token(self) -> str:
+        if not self._external_notify_token:
+            return "未生成"
+        token = self._external_notify_token
+        if len(token) <= 8:
+            return "已生成"
+        return f"{token[:4]}...{token[-4:]}"
+
+    def _format_notify_stage(self) -> str:
+        return {
+            "download_added": "添加下载任务时",
+            "transfer_complete": "文件整理完成时",
+            "both": "两者都通知",
+        }.get(self._notify_stage, self._notify_stage or "")
 
     def get_service(self) -> List[Dict[str, Any]]:
         if not self._enabled or not self._qb_poll_enabled:
