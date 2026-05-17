@@ -1,5 +1,8 @@
+import re
 import secrets
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from app.plugins import _PluginBase
 
@@ -45,7 +48,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Plugins/main/icons/notice.png"
-    plugin_version = "0.0.13"
+    plugin_version = "0.0.14"
     plugin_author = "jardy"
     author_url = ""
     plugin_config_prefix = "downloadaddednotify_"
@@ -147,6 +150,9 @@ class DownloadAddedNotify(_PluginBase):
         )
         tags = self._first_value(data, "tags", "tag")
         size = self._format_size_mb(self._first_raw_value(self._to_dict(torrent_info), "size"))
+        quality = self._first_value(self._to_dict(torrent_info), "quality", "resolution") or self._extract_quality(title)
+        seeders = self._format_seed_count(self._first_raw_value(self._to_dict(torrent_info), "seeders", "seeds", "num_seeds"))
+        description = self._first_value(self._to_dict(torrent_info), "description", "descr", "subtitle")
         media_title = self._media_title(media_info)
         year = self._first_value(self._to_dict(media_info), "year") or self._first_value(self._to_dict(meta_info), "year")
 
@@ -154,14 +160,17 @@ class DownloadAddedNotify(_PluginBase):
         if media_text and year:
             media_text = f"{media_text} ({year})"
         lines = self._message_lines(
-            ("任务", title),
-            ("事件", "下载已添加"),
+            ("时间", self._now_text()),
             ("媒体", media_text),
             ("站点", site),
-            ("下载器", downloader),
+            ("质量", quality),
             ("大小", size),
+            ("做种", seeders),
             ("分类", category),
             ("标签", tags),
+            ("名称", title),
+            ("描述", description),
+            ("下载器", downloader),
             ("目录", save_path),
         )
         if self._include_raw_summary:
@@ -219,8 +228,8 @@ class DownloadAddedNotify(_PluginBase):
         )
 
         lines = self._message_lines(
-            ("任务", title),
-            ("事件", "下载已完成"),
+            ("时间", self._now_text()),
+            ("名称", title),
             ("下载器", downloader),
             ("源文件", source_path),
             ("入库位置", target_path),
@@ -312,17 +321,23 @@ class DownloadAddedNotify(_PluginBase):
         category = self._first_value(torrent_data, "category")
         tags = self._first_value(torrent_data, "tags")
         state = self._first_value(torrent_data, "state")
+        site = self._format_site(self._first_value(torrent_data, "tracker", "tracker_host", "site", "site_name"))
         size = self._format_size_mb(self._first_raw_value(torrent_data, "total_size", "size"))
+        quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
+        seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
 
         lines = self._message_lines(
-            ("任务", title),
-            ("事件", "下载已添加"),
+            ("时间", self._now_text()),
             ("来源", "qBittorrent 轮询"),
-            ("下载器", downloader),
+            ("站点", site),
             ("状态", self._format_qb_state(state)),
+            ("质量", quality),
             ("大小", size),
+            ("做种", seeders),
             ("分类", category),
             ("标签", tags),
+            ("名称", title),
+            ("下载器", downloader),
             ("目录", save_path),
         )
         if self._include_raw_summary:
@@ -366,19 +381,26 @@ class DownloadAddedNotify(_PluginBase):
         category = self._first_value(payload, "category")
         tags = self._first_value(payload, "tags")
         state = self._first_value(payload, "state")
+        site = self._format_site(self._first_value(payload, "tracker", "site", "site_name"))
         size = self._format_size_mb(self._first_raw_value(payload, "size", "total_size"))
+        quality = self._first_value(payload, "quality", "resolution") or self._extract_quality(title)
+        seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
 
         event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
         prefix = self._complete_title_prefix if event in ("completed", "finished", "done") else self._title_prefix
         lines = self._message_lines(
-            ("任务", title),
-            ("事件", event_name),
+            ("时间", self._now_text()),
             ("来源", "qBittorrent 外部程序"),
-            ("下载器", downloader),
+            ("事件", event_name),
+            ("站点", site),
             ("状态", self._format_qb_state(state)),
+            ("质量", quality),
             ("大小", size),
+            ("做种", seeders),
             ("分类", category),
             ("标签", tags),
+            ("名称", title),
+            ("下载器", downloader),
             ("目录", save_path),
         )
         if self._include_raw_summary:
@@ -695,6 +717,10 @@ class DownloadAddedNotify(_PluginBase):
             return None
 
     @staticmethod
+    def _now_text() -> str:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
     def _raise_http_error(status_code: int, detail: str):
         if HTTPException:
             raise HTTPException(status_code=status_code, detail=detail)
@@ -714,7 +740,7 @@ class DownloadAddedNotify(_PluginBase):
             "--data-urlencode \"category=%L\" "
             "--data-urlencode \"tags=%G\" "
             "--data-urlencode \"size=%Z\" "
-            "--data-urlencode \"state=%T\""
+            "--data-urlencode \"tracker=%T\""
         )
 
     @staticmethod
@@ -809,6 +835,56 @@ class DownloadAddedNotify(_PluginBase):
             "uploading": "做种中",
         }
         return state_map.get(text.lower(), text)
+
+    @staticmethod
+    def _extract_quality(title: Any) -> Optional[str]:
+        if title in (None, ""):
+            return None
+        text = str(title)
+        parts = []
+        quality_patterns = (
+            r"\b(2160p|1080p|720p|480p)\b",
+            r"\b(WEB-?DL|WEBRip|BluRay|BDRip|HDTV|DVDRip)\b",
+            r"\b(H\.?265|H\.?264|HEVC|AVC|x265|x264)\b",
+            r"\b(HDR10\+?|DV|DoVi|SDR)\b",
+        )
+        for pattern in quality_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                value = match.group(1).replace(".", "").upper()
+                if value == "WEB-DL":
+                    value = "WEB-DL"
+                elif value == "WEBDL":
+                    value = "WEB-DL"
+                parts.append(value)
+        return " ".join(dict.fromkeys(parts)) or None
+
+    @staticmethod
+    def _format_site(value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        parsed = urlparse(text)
+        host = parsed.netloc or parsed.path
+        if "@" in host:
+            host = host.rsplit("@", 1)[-1]
+        if ":" in host:
+            host = host.split(":", 1)[0]
+        return host or text
+
+    @staticmethod
+    def _format_seed_count(value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        try:
+            number = int(float(value))
+        except (TypeError, ValueError):
+            return str(value)
+        if number < 0:
+            return None
+        return str(number)
 
     @staticmethod
     def _format_size_mb(value: Any) -> Optional[str]:
