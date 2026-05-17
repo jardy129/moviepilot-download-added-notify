@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.7"
+    plugin_version = "0.1.8"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1091,8 +1091,14 @@ class DownloadAddedNotify(_PluginBase):
         event_text: Optional[str] = None,
         episode: Any = None,
     ) -> str:
+        release_info = cls._parse_release_name(title)
         media_text = cls._clean_message_value(media_title)
         episode_text = cls._format_episode_text(episode) or cls._extract_episode(title)
+        if release_info:
+            base_title = release_info.get("title_zh") or release_info.get("title_en")
+            release_year = year or release_info.get("year") or cls._extract_year(title)
+            base = cls._ensure_title_year(base_title, release_year)
+            return cls._join_title_parts(base, episode_text, event_text)
         if media_text:
             base = cls._ensure_title_year(media_text, year or cls._extract_year(title))
             return cls._join_title_parts(base, episode_text, event_text)
@@ -1331,6 +1337,9 @@ class DownloadAddedNotify(_PluginBase):
 
     @classmethod
     def _compact_name(cls, value: Any, max_len: int = 96) -> Optional[str]:
+        pretty_name = cls._format_release_name(value)
+        if pretty_name:
+            return pretty_name
         text = cls._clean_message_value(value)
         if not text:
             return None
@@ -1338,6 +1347,55 @@ class DownloadAddedNotify(_PluginBase):
         if len(text) <= max_len:
             return text
         return f"{text[:max_len - 3].rstrip()}..."
+
+    @classmethod
+    def _format_release_name(cls, value: Any) -> Optional[str]:
+        info = cls._parse_release_name(value)
+        if not info:
+            return None
+        title_zh = info.get("title_zh")
+        title_en = info.get("title_en")
+        title_part = f"【{title_zh}】{title_en}" if title_zh and title_en else (title_zh or title_en)
+        season_part = info.get("season")
+        video_parts = [item for item in (info.get("resolution"), info.get("fps")) if item]
+        audio_part = info.get("audio")
+        group_part = info.get("group")
+        parts = [part for part in (title_part, season_part, " ".join(video_parts), audio_part) if part]
+        pretty = " | ".join(parts)
+        if group_part:
+            pretty = f"{pretty} - {group_part}" if pretty else group_part
+        return pretty or None
+
+    @classmethod
+    def _parse_release_name(cls, value: Any) -> Optional[Dict[str, str]]:
+        text = cls._clean_message_value(value)
+        if not text:
+            return None
+        basename = os.path.splitext(os.path.basename(text))[0]
+        pattern = (
+            r"^(?P<title_zh>[\u4e00-\u9fff][^.]+)\."
+            r"(?P<title_en>.+?)\."
+            r"(?P<season>S\d{1,2})\."
+            r"(?P<year>\d{4})\."
+            r"(?P<resolution>\d{3,4}p)\."
+            r"(?P<source>[^.]+)\."
+            r"(?P<codec>[^.]+)"
+            r"(?:\.(?P<quality>[^.]+))?"
+            r"(?:\.(?P<fps>\d+fps))?"
+            r"(?:\.(?P<audio>.+?))?"
+            r"(?:-(?P<group>[^.-]+))?$"
+        )
+        match = re.match(pattern, basename, re.IGNORECASE)
+        if not match:
+            return None
+        info = {key: value for key, value in match.groupdict().items() if value}
+        if "title_en" in info:
+            info["title_en"] = info["title_en"].replace(".", " ").strip()
+        if "season" in info:
+            info["season"] = info["season"].upper()
+        if "resolution" in info:
+            info["resolution"] = info["resolution"].lower()
+        return info
 
     @staticmethod
     def _format_qb_state(state: Any) -> Optional[str]:

@@ -2,13 +2,14 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.1.7",
+    "version": "0.1.8",
     "icon": "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png",
     "author": "jardy",
     "author_url": "https://github.com/jardy129/",
     "level": 0,
     "v2": true,
     "history": {
+      "v0.1.8": "按发布命名结构解析标题和名称，优先中文标题并优化名称断句",
       "v0.1.7": "优化名称字段换行断句，续行与冒号后的内容对齐",
       "v0.1.6": "优化标题提取，优先中文标题并精简英文别名和季号",
       "v0.1.5": "刷新插件市场元数据，补充作者主页并保留 0.1.0 起始历史",
