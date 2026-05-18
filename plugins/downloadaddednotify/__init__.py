@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.19"
+    plugin_version = "0.1.20"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -200,9 +200,10 @@ class DownloadAddedNotify(_PluginBase):
         )
         site = self._first_value(torrent_data, "site_name", "site")
         save_path = self._first_value(data, "save_path", "savepath", "path", "download_path")
-        category = (
+        category = self._format_category(
             self._first_value(torrent_data, "category")
-            or self._first_value(media_data, "category", "type")
+            or self._first_value(media_data, "category", "type"),
+            title,
         )
         tags = self._first_value(data, "tags", "tag")
         size = self._format_size_gb(self._first_raw_value(torrent_data, "size"))
@@ -385,7 +386,7 @@ class DownloadAddedNotify(_PluginBase):
         title = self._first_value(torrent_data, "name", "title") or "未知任务"
         content_path = self._first_value(torrent_data, "content_path", "contentPath", "file_path", "path")
         save_path = self._first_value(torrent_data, "save_path", "content_path")
-        category = self._first_value(torrent_data, "category")
+        category = self._format_category(self._first_value(torrent_data, "category"), title)
         tags = self._first_value(torrent_data, "tags")
         state = self._first_value(torrent_data, "state")
         site = self._format_site(self._first_value(torrent_data, "tracker", "tracker_host", "site", "site_name"))
@@ -463,7 +464,7 @@ class DownloadAddedNotify(_PluginBase):
         downloader = self._first_value(payload, "downloader") or "Qbittorrent"
         content_path = self._first_value(payload, "content_path", "contentPath", "file_path")
         save_path = self._first_value(payload, "save_path", "path", "content_path")
-        category = self._first_value(payload, "category")
+        category = self._format_category(self._first_value(payload, "category"), title)
         tags = self._first_value(payload, "tags")
         state = self._first_value(payload, "state")
         site = self._format_site(self._first_value(payload, "tracker", "site", "site_name"))
@@ -1315,7 +1316,8 @@ class DownloadAddedNotify(_PluginBase):
             base_title = release_info.get("title_zh") or release_info.get("title_en")
             release_year = year or release_info.get("year") or cls._extract_year(title)
             base = cls._ensure_title_year(base_title, release_year)
-            return cls._join_title_parts(base, episode_text or release_info.get("season"), event_text)
+            release_episode = cls._release_episode_text(release_info, episode_text)
+            return cls._join_title_parts(base, release_episode, event_text)
         if media_text:
             base = cls._ensure_title_year(media_text, year or cls._extract_year(title))
             return cls._join_title_parts(base, episode_text, event_text)
@@ -1363,6 +1365,22 @@ class DownloadAddedNotify(_PluginBase):
         if event_text:
             parts.append(event_text)
         return cls._compact_name(" ".join(parts), 64) or "未知任务"
+
+    @classmethod
+    def _release_episode_text(cls, info: Dict[str, str], fallback_episode: Optional[str] = None) -> Optional[str]:
+        season = info.get("season")
+        episode = info.get("episode")
+        if season and episode:
+            return cls._format_season_episode(season.lstrip("S"), episode)
+        if season and fallback_episode:
+            if re.match(r"^S\d{2}E\d{2,3}$", fallback_episode, re.IGNORECASE):
+                return fallback_episode.upper()
+            if re.match(r"^E\d{2,3}$", fallback_episode, re.IGNORECASE):
+                return f"{season.upper()}{fallback_episode.upper()}"
+            return fallback_episode
+        if season:
+            return season.upper()
+        return None
 
     @staticmethod
     def _extract_year(value: Any) -> Optional[str]:
@@ -1638,6 +1656,14 @@ class DownloadAddedNotify(_PluginBase):
         return None
 
     @classmethod
+    def _format_category(cls, category: Any, title: Any = None) -> Optional[str]:
+        text = cls._clean_message_value(category)
+        release_info = cls._parse_release_name(title)
+        if release_info and release_info.get("year") and not release_info.get("season"):
+            return "电影"
+        return text
+
+    @classmethod
     def _parse_release_name(cls, value: Any) -> Optional[Dict[str, str]]:
         text = cls._clean_message_value(value)
         if not text:
@@ -1669,18 +1695,32 @@ class DownloadAddedNotify(_PluginBase):
             if match:
                 break
         if not match:
-            space_pattern = (
-                r"^(?:(?P<title_zh>[\u4e00-\u9fff][^\s]*)\s+)?"
+            title_prefix = (
+                r"^(?:(?P<title_zh>[\u4e00-\u9fff][^.]+)\.)?"
                 r"(?P<title_en>.+?)\s+"
                 r"(?:(?P<season>S\d{1,2})(?:E(?P<episode>\d{1,3}))?\s+)?"
                 r"(?P<year>\d{4})\s+"
                 r"(?P<resolution>\d{3,4}p)\s+"
-                r"(?P<source>\S+)\s+"
-                r"(?P<codec>\S+)"
-                r"(?:\s+(?P<audio>.+?))?"
-                r"(?:-(?P<group>[^-]+))?$"
             )
-            match = re.match(space_pattern, basename, re.IGNORECASE)
+            space_patterns = (
+                title_prefix
+                + r"(?P<source>.+?)\s+"
+                + r"(?P<codec>H\.?26[45]|HEVC|AVC|x26[45])\s+"
+                + r"(?P<audio>.+?)-(?P<group>.+)$",
+                title_prefix
+                + r"(?P<source>.+?)\s+"
+                + r"(?P<audio>DTS\d(?:\.\d)?|TrueHD(?:\s+\d(?:\.\d)?)?|DDP?\d(?:\.\d)?|AAC|AC3)\s+"
+                + r"(?P<quality>(?:H\.?26[45]|HEVC|AVC|x26[45])(?:-[^@]+)?@.+)$",
+                title_prefix
+                + r"(?P<source>\S+)\s+"
+                + r"(?P<codec>\S+)"
+                + r"(?:\s+(?P<audio>.+?))?"
+                + r"(?:-(?P<group>[^-]+))?$",
+            )
+            for pattern in space_patterns:
+                match = re.match(pattern, basename, re.IGNORECASE)
+                if match:
+                    break
         if not match:
             return None
         info = {key: value for key, value in match.groupdict().items() if value}
