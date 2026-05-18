@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.14"
+    plugin_version = "0.1.15"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -893,8 +893,22 @@ class DownloadAddedNotify(_PluginBase):
                 "allow_anonymous": True,
                 "summary": "接收 Qbittorrent 外部程序通知",
                 "description": "由 Qbittorrent 外部程序脚本调用，用于通知手动添加或完成的种子任务",
+            },
+            {
+                "path": "/save_config",
+                "endpoint": self.save_page_config,
+                "methods": ["POST"],
+                "summary": "保存插件详情页配置",
+                "description": "保存插件详情页填写的配置项",
             }
         ]
+
+    async def save_page_config(self, request: Request) -> Dict[str, Any]:
+        payload = await self._request_payload(request)
+        config = self._page_config_from_payload(payload)
+        self.update_config(config)
+        self.init_plugin(config)
+        return {"success": True, "message": "配置已保存"}
 
     def get_page(self) -> Optional[List[dict]]:
         return [
@@ -949,11 +963,110 @@ class DownloadAddedNotify(_PluginBase):
                                 self._build_qb_command("completed"),
                                 True,
                             ),
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "class": "d-flex justify-end"},
+                                "content": [
+                                    {
+                                        "component": "VBtn",
+                                        "props": {
+                                            "color": "primary",
+                                            "variant": "text",
+                                            "prepend-icon": "mdi-content-save",
+                                        },
+                                        "text": "保存",
+                                        "events": {
+                                            "click": {
+                                                "api": "plugin/DownloadAddedNotify/save_config",
+                                                "method": "post",
+                                                "params": self._page_save_params(),
+                                            }
+                                        },
+                                    }
+                                ],
+                            },
                         ],
                     }
                 ],
             }
         ]
+
+    @staticmethod
+    def _page_save_params() -> Dict[str, str]:
+        fields = (
+            "enabled",
+            "qb_poll_enabled",
+            "qb_auto_tag_enabled",
+            "qb_web_url",
+            "qb_username",
+            "qb_password",
+            "qb_tag_name",
+            "moviepilot_base_url",
+            "qb_downloader_name",
+            "downloader_label_name",
+            "qb_poll_interval",
+            "notify_stage",
+            "notify_type",
+            "only_downloader",
+            "release_name_template",
+            "header_image_url",
+            "external_notify_enabled",
+            "external_notify_token",
+        )
+        return {field: f"{{{{ {field} }}}}" for field in fields}
+
+    def _page_config_from_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        current = self.get_config() or {}
+        config = dict(current)
+        for field in (
+            "qb_web_url",
+            "qb_username",
+            "qb_password",
+            "qb_tag_name",
+            "moviepilot_base_url",
+            "qb_downloader_name",
+            "downloader_label_name",
+            "notify_stage",
+            "notify_type",
+            "only_downloader",
+            "release_name_template",
+            "header_image_url",
+            "external_notify_token",
+        ):
+            if field in payload:
+                config[field] = self._clean_page_param(payload.get(field))
+        for field in ("enabled", "qb_poll_enabled", "qb_auto_tag_enabled", "external_notify_enabled"):
+            if field in payload:
+                config[field] = self._parse_page_bool(payload.get(field), bool(config.get(field)))
+        if "qb_poll_interval" in payload:
+            config["qb_poll_interval"] = self._safe_int(
+                self._clean_page_param(payload.get("qb_poll_interval")),
+                60,
+                15,
+            )
+        config["qb_added_command"] = self._build_qb_command("added")
+        config["qb_completed_command"] = self._build_qb_command("completed")
+        return config
+
+    @staticmethod
+    def _clean_page_param(value: Any) -> str:
+        if value in (None, ""):
+            return ""
+        text = str(value).strip()
+        if re.fullmatch(r"\{\{\s*[\w_]+\s*\}\}", text):
+            return ""
+        return text
+
+    @classmethod
+    def _parse_page_bool(cls, value: Any, default: bool = False) -> bool:
+        text = cls._clean_page_param(value).lower()
+        if text in ("true", "1", "yes", "on", "启用"):
+            return True
+        if text in ("false", "0", "no", "off", "关闭", ""):
+            return False
+        if isinstance(value, bool):
+            return value
+        return default
 
     @staticmethod
     def _page_col(content: dict, md: int = 6) -> dict:
