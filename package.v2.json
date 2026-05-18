@@ -2,13 +2,14 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.1.17",
+    "version": "0.1.18",
     "icon": "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png",
     "author": "jardy",
     "author_url": "https://github.com/jardy129/",
     "level": 0,
     "v2": true,
     "history": {
+      "v0.1.18": "精简插件详情页布局，配置保存统一使用原生配置弹窗",
       "v0.1.17": "修正详情页保存按钮参数绑定，确保页面配置可提交保存",
       "v0.1.16": "调整插件详情页保存按钮位置，避免与页面悬浮按钮重叠",
       "v0.1.15": "在插件详情页增加保存按钮，支持直接保存页面配置",

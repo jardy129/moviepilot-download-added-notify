@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.17"
+    plugin_version = "0.1.18"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -523,7 +523,7 @@ class DownloadAddedNotify(_PluginBase):
                         "content": [
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VSwitch",
@@ -536,7 +536,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -550,7 +550,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VSwitch",
@@ -563,7 +563,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -619,7 +619,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -633,7 +633,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -647,7 +647,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VSelect",
@@ -738,7 +738,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -765,7 +765,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VSwitch",
@@ -778,7 +778,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -794,7 +794,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VSwitch",
@@ -829,7 +829,8 @@ class DownloadAddedNotify(_PluginBase):
                                             "model": "qb_added_command",
                                             "label": "qBittorrent 添加种子时运行外部程序",
                                             "rows": 2,
-                                            "auto-grow": True,
+                                            "auto-grow": False,
+                                            "no-resize": True,
                                             "readonly": True,
                                         },
                                     }
@@ -845,7 +846,8 @@ class DownloadAddedNotify(_PluginBase):
                                             "model": "qb_completed_command",
                                             "label": "qBittorrent 完成下载时运行外部程序",
                                             "rows": 2,
-                                            "auto-grow": True,
+                                            "auto-grow": False,
+                                            "no-resize": True,
                                             "readonly": True,
                                         },
                                     }
@@ -893,22 +895,8 @@ class DownloadAddedNotify(_PluginBase):
                 "allow_anonymous": True,
                 "summary": "接收 Qbittorrent 外部程序通知",
                 "description": "由 Qbittorrent 外部程序脚本调用，用于通知手动添加或完成的种子任务",
-            },
-            {
-                "path": "/save_config",
-                "endpoint": self.save_page_config,
-                "methods": ["POST"],
-                "summary": "保存插件详情页配置",
-                "description": "保存插件详情页填写的配置项",
             }
         ]
-
-    async def save_page_config(self, request: Request) -> Dict[str, Any]:
-        payload = await self._request_payload(request)
-        config = self._page_config_from_payload(payload)
-        self.update_config(config)
-        self.init_plugin(config)
-        return {"success": True, "message": "配置已保存"}
 
     def get_page(self) -> Optional[List[dict]]:
         return [
@@ -931,27 +919,26 @@ class DownloadAddedNotify(_PluginBase):
                                 self._qb_auto_tag_enabled,
                                 4,
                             ),
-                            self._page_text("qb_web_url", "qBittorrent Web 地址", self._qb_web_url, 6),
+                            self._page_text("qb_web_url", "qBittorrent Web 地址", self._qb_web_url, 4),
                             self._page_text("qb_username", "qBittorrent 用户名", self._qb_username, 3),
                             self._page_text("qb_password", "qBittorrent 密码", self._qb_password, 3, "password"),
-                            self._page_text("qb_tag_name", "自动标签名称", self._qb_tag_name, 3),
-                            self._page_text("moviepilot_base_url", "MoviePilot 地址", self._moviepilot_base_url, 6),
-                            self._page_text("qb_downloader_name", "下载器名称", self._qb_downloader_name, 3),
+                            self._page_text("qb_tag_name", "自动标签名称", self._qb_tag_name, 2),
+                            self._page_text("moviepilot_base_url", "MoviePilot 地址", self._moviepilot_base_url, 4),
+                            self._page_text("qb_downloader_name", "下载器名称", self._qb_downloader_name, 2),
                             self._page_text("downloader_label_name", "下载器标签名称", self._downloader_label_name, 3),
                             self._page_text("qb_poll_interval", "轮询间隔（秒）", self._qb_poll_interval, 3),
                             self._page_text("notify_stage", "通知时机", self._format_notify_stage(), 3),
                             self._page_text("notify_type", "通知类型", self._notify_type, 3),
                             self._page_text("only_downloader", "只通知下载器", self._only_downloader or "全部", 3),
-                            self._page_text("release_name_template", "名称标签模板", self._release_name_template, 12),
+                            self._page_text("release_name_template", "名称标签模板", self._release_name_template, 6),
                             self._page_text("header_image_url", "推送头图 URL", self._header_image_url or "未设置", 3),
                             self._page_switch(
                                 "external_notify_enabled",
                                 "外部程序通知接口",
                                 self._external_notify_enabled,
-                                4,
+                                3,
                             ),
-                            self._page_text("external_notify_token", "外部通知 Token", self._external_notify_token, 8),
-                            self._page_save_button(),
+                            self._page_text("external_notify_token", "外部通知 Token", self._external_notify_token, 3),
                             self._page_textarea(
                                 "qb_added_command",
                                 "qBittorrent 添加种子时运行外部程序",
@@ -970,108 +957,6 @@ class DownloadAddedNotify(_PluginBase):
             }
         ]
 
-    @classmethod
-    def _page_save_button(cls) -> dict:
-        return {
-            "component": "VCol",
-            "props": {"cols": 12, "class": "d-flex justify-start my-2"},
-            "content": [
-                {
-                    "component": "VBtn",
-                    "props": {
-                        "color": "primary",
-                        "variant": "text",
-                        "prepend-icon": "mdi-content-save",
-                    },
-                    "text": "保存",
-                    "events": {
-                        "click": {
-                            "api": "plugin/DownloadAddedNotify/save_config",
-                            "method": "post",
-                            "params": cls._page_save_params(),
-                        }
-                    },
-                }
-            ],
-        }
-
-    @staticmethod
-    def _page_save_params() -> Dict[str, str]:
-        fields = (
-            "enabled",
-            "qb_poll_enabled",
-            "qb_auto_tag_enabled",
-            "qb_web_url",
-            "qb_username",
-            "qb_password",
-            "qb_tag_name",
-            "moviepilot_base_url",
-            "qb_downloader_name",
-            "downloader_label_name",
-            "qb_poll_interval",
-            "notify_stage",
-            "notify_type",
-            "only_downloader",
-            "release_name_template",
-            "header_image_url",
-            "external_notify_enabled",
-            "external_notify_token",
-        )
-        return {field: f"{{{{{field}}}}}" for field in fields}
-
-    def _page_config_from_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        current = self.get_config() or {}
-        config = dict(current)
-        for field in (
-            "qb_web_url",
-            "qb_username",
-            "qb_password",
-            "qb_tag_name",
-            "moviepilot_base_url",
-            "qb_downloader_name",
-            "downloader_label_name",
-            "notify_stage",
-            "notify_type",
-            "only_downloader",
-            "release_name_template",
-            "header_image_url",
-            "external_notify_token",
-        ):
-            if field in payload:
-                config[field] = self._clean_page_param(payload.get(field))
-        for field in ("enabled", "qb_poll_enabled", "qb_auto_tag_enabled", "external_notify_enabled"):
-            if field in payload:
-                config[field] = self._parse_page_bool(payload.get(field), bool(config.get(field)))
-        if "qb_poll_interval" in payload:
-            config["qb_poll_interval"] = self._safe_int(
-                self._clean_page_param(payload.get("qb_poll_interval")),
-                60,
-                15,
-            )
-        config["qb_added_command"] = self._build_qb_command("added")
-        config["qb_completed_command"] = self._build_qb_command("completed")
-        return config
-
-    @staticmethod
-    def _clean_page_param(value: Any) -> str:
-        if value in (None, ""):
-            return ""
-        text = str(value).strip()
-        if re.fullmatch(r"\{\{\s*[\w_]+\s*\}\}", text):
-            return ""
-        return text
-
-    @classmethod
-    def _parse_page_bool(cls, value: Any, default: bool = False) -> bool:
-        text = cls._clean_page_param(value).lower()
-        if text in ("true", "1", "yes", "on", "启用"):
-            return True
-        if text in ("false", "0", "no", "off", "关闭", ""):
-            return False
-        if isinstance(value, bool):
-            return value
-        return default
-
     @staticmethod
     def _page_col(content: dict, md: int = 6) -> dict:
         return {
@@ -1089,6 +974,7 @@ class DownloadAddedNotify(_PluginBase):
                     "model": model,
                     "label": label,
                     "model-value": bool(value),
+                    "readonly": True,
                 },
             },
             md,
@@ -1100,6 +986,8 @@ class DownloadAddedNotify(_PluginBase):
             "model": model,
             "label": label,
             "model-value": cls._display_page_value(value),
+            "density": "compact",
+            "readonly": True,
         }
         if field_type:
             props["type"] = field_type
@@ -1118,7 +1006,9 @@ class DownloadAddedNotify(_PluginBase):
             "label": label,
             "model-value": cls._display_page_value(value),
             "rows": 2,
-            "auto-grow": True,
+            "auto-grow": False,
+            "density": "compact",
+            "no-resize": True,
         }
         if readonly:
             props["readonly"] = True
