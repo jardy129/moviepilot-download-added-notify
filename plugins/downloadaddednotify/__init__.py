@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.11"
+    plugin_version = "0.1.12"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1544,10 +1544,7 @@ class DownloadAddedNotify(_PluginBase):
         root, ext = os.path.splitext(basename)
         if ext.lower() in cls._video_extensions:
             basename = root
-        pattern = (
-            r"^(?P<title_zh>[\u4e00-\u9fff][^.]+)\."
-            r"(?P<title_en>.+?)\."
-            r"(?P<season>S\d{1,2})(?:E(?P<episode>\d{1,3}))?\."
+        base_pattern = (
             r"(?P<year>\d{4})\."
             r"(?P<resolution>\d{3,4}p)\."
             r"(?P<source>[^.]+)\."
@@ -1557,7 +1554,18 @@ class DownloadAddedNotify(_PluginBase):
             r"(?:\.(?P<audio>.+?))?"
             r"(?:-(?P<group>[^.-]+))?$"
         )
-        match = re.match(pattern, basename, re.IGNORECASE)
+        patterns = (
+            rf"^(?P<title_zh>[\u4e00-\u9fff][^.]+)\."
+            rf"(?P<title_en>.+?)\."
+            rf"(?P<season>S\d{{1,2}})(?:E(?P<episode>\d{{1,3}}))?\.{base_pattern}",
+            rf"^(?P<title_zh>[\u4e00-\u9fff][^.]+)\.(?P<title_en>.+?)\.{base_pattern}",
+            rf"^(?P<title_en>.+?)\.{base_pattern}",
+        )
+        match = None
+        for pattern in patterns:
+            match = re.match(pattern, basename, re.IGNORECASE)
+            if match:
+                break
         if not match:
             return None
         info = {key: value for key, value in match.groupdict().items() if value}
