@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.15"
+    plugin_version = "0.1.16"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -951,6 +951,7 @@ class DownloadAddedNotify(_PluginBase):
                                 4,
                             ),
                             self._page_text("external_notify_token", "外部通知 Token", self._external_notify_token, 8),
+                            self._page_save_button(),
                             self._page_textarea(
                                 "qb_added_command",
                                 "qBittorrent 添加种子时运行外部程序",
@@ -963,33 +964,36 @@ class DownloadAddedNotify(_PluginBase):
                                 self._build_qb_command("completed"),
                                 True,
                             ),
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12, "class": "d-flex justify-end"},
-                                "content": [
-                                    {
-                                        "component": "VBtn",
-                                        "props": {
-                                            "color": "primary",
-                                            "variant": "text",
-                                            "prepend-icon": "mdi-content-save",
-                                        },
-                                        "text": "保存",
-                                        "events": {
-                                            "click": {
-                                                "api": "plugin/DownloadAddedNotify/save_config",
-                                                "method": "post",
-                                                "params": self._page_save_params(),
-                                            }
-                                        },
-                                    }
-                                ],
-                            },
                         ],
                     }
                 ],
             }
         ]
+
+    @classmethod
+    def _page_save_button(cls) -> dict:
+        return {
+            "component": "VCol",
+            "props": {"cols": 12, "class": "d-flex justify-start my-2"},
+            "content": [
+                {
+                    "component": "VBtn",
+                    "props": {
+                        "color": "primary",
+                        "variant": "text",
+                        "prepend-icon": "mdi-content-save",
+                    },
+                    "text": "保存",
+                    "events": {
+                        "click": {
+                            "api": "plugin/DownloadAddedNotify/save_config",
+                            "method": "post",
+                            "params": cls._page_save_params(),
+                        }
+                    },
+                }
+            ],
+        }
 
     @staticmethod
     def _page_save_params() -> Dict[str, str]:
