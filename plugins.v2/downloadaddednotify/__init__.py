@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.18"
+    plugin_version = "0.1.19"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1690,11 +1690,29 @@ class DownloadAddedNotify(_PluginBase):
             info["season"] = info["season"].upper()
         if "resolution" in info:
             info["resolution"] = info["resolution"].lower()
-        cls._normalize_space_release_info(info)
+        cls._normalize_release_info(info)
         return info
 
     @classmethod
-    def _normalize_space_release_info(cls, info: Dict[str, str]):
+    def _normalize_release_info(cls, info: Dict[str, str]):
+        quality = info.get("quality")
+        if quality and "@" in quality:
+            release_match = re.match(
+                r"^(?P<codec>H\.?26[45]|HEVC|AVC|x26[45])(?:-(?P<tag>[^@]+))?@(?P<group>.+)$",
+                quality,
+                re.IGNORECASE,
+            )
+            if release_match:
+                current_codec = info.get("codec")
+                if current_codec and cls._looks_like_audio(current_codec) and not info.get("audio"):
+                    info["audio"] = current_codec
+                info["codec"] = release_match.group("codec")
+                tag = release_match.group("tag")
+                if tag:
+                    info["release_tag"] = f"{release_match.group('codec')}-{tag}"
+                info["group"] = release_match.group("group")
+                info.pop("quality", None)
+
         audio = info.get("audio")
         group = info.get("group")
         if not audio or not group or "@" not in group:
