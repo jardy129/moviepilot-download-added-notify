@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.12"
+    plugin_version = "0.1.13"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1524,7 +1524,8 @@ class DownloadAddedNotify(_PluginBase):
         title = info.get("title_zh") or info.get("title_en")
         quality = " ".join(item for item in (info.get("resolution"), info.get("fps")) if item)
         audio = cls._format_release_audio(info.get("audio"))
-        parts = [part for part in (title, quality, audio, info.get("group")) if part]
+        group = cls._format_release_group(info.get("group"))
+        parts = [part for part in (title, quality, audio, group) if part]
         return " | ".join(parts) or None
 
     @staticmethod
@@ -1534,6 +1535,15 @@ class DownloadAddedNotify(_PluginBase):
         text = str(value).strip()
         match = re.match(r"^(DTS\d(?:\.\d)?|DDP?\d(?:\.\d)?|AAC|AC3)", text, re.IGNORECASE)
         return match.group(1) if match else text
+
+    @staticmethod
+    def _format_release_group(value: Any) -> Optional[str]:
+        if not value:
+            return None
+        text = str(value).strip()
+        if "@" in text:
+            text = text.rsplit("@", 1)[-1]
+        return text or None
 
     @classmethod
     def _parse_release_name(cls, value: Any) -> Optional[Dict[str, str]]:
@@ -1566,6 +1576,18 @@ class DownloadAddedNotify(_PluginBase):
             match = re.match(pattern, basename, re.IGNORECASE)
             if match:
                 break
+        if not match:
+            space_pattern = (
+                r"^(?:(?P<title_zh>[\u4e00-\u9fff][^\s]*)\s+)?"
+                r"(?P<title_en>.+?)\s+"
+                r"(?P<year>\d{4})\s+"
+                r"(?P<resolution>\d{3,4}p)\s+"
+                r"(?P<source>\S+)\s+"
+                r"(?P<codec>\S+)"
+                r"(?:\s+(?P<audio>.+?))?"
+                r"(?:-(?P<group>[^-]+))?$"
+            )
+            match = re.match(space_pattern, basename, re.IGNORECASE)
         if not match:
             return None
         info = {key: value for key, value in match.groupdict().items() if value}
