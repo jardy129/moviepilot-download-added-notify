@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.13"
+    plugin_version = "0.1.14"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -71,12 +71,14 @@ class DownloadAddedNotify(_PluginBase):
     _external_notify_token = ""
     _moviepilot_base_url = "http://moviepilot:3001"
     _qb_downloader_name = "Qbittorrent"
+    _downloader_label_name = ""
     _header_image_url = ""
     _qb_auto_tag_enabled = True
     _qb_web_url = ""
     _qb_username = ""
     _qb_password = ""
     _qb_tag_name = "MOVIEPILOT"
+    _release_name_template = "{title} | {resolution}{fps_part} | {audio} | {group}"
     _video_extensions = {
         ".mkv",
         ".mp4",
@@ -122,12 +124,18 @@ class DownloadAddedNotify(_PluginBase):
         self._external_notify_token = (config.get("external_notify_token") or "").strip()
         self._moviepilot_base_url = (config.get("moviepilot_base_url") or "http://moviepilot:3001").strip()
         self._qb_downloader_name = (config.get("qb_downloader_name") or "Qbittorrent").strip()
+        self._downloader_label_name = (config.get("downloader_label_name") or "").strip()
         self._header_image_url = (config.get("header_image_url") or "").strip()
         self._qb_auto_tag_enabled = bool(config.get("qb_auto_tag_enabled", True))
         self._qb_web_url = (config.get("qb_web_url") or "").strip()
         self._qb_username = (config.get("qb_username") or "").strip()
         self._qb_password = (config.get("qb_password") or "").strip()
         self._qb_tag_name = (config.get("qb_tag_name") or "MOVIEPILOT").strip()
+        self._release_name_template = (
+            config.get("release_name_template")
+            or "{title} | {resolution}{fps_part} | {audio} | {group}"
+        ).strip()
+        self.__class__._release_name_template = self._release_name_template
         if not self._external_notify_token:
             self._external_notify_token = secrets.token_urlsafe(24)
             config["external_notify_token"] = self._external_notify_token
@@ -145,10 +153,12 @@ class DownloadAddedNotify(_PluginBase):
             or config.get("external_notify_token") != saved_config.get("external_notify_token")
             or config.get("moviepilot_base_url") != saved_config.get("moviepilot_base_url")
             or config.get("qb_downloader_name") != saved_config.get("qb_downloader_name")
+            or config.get("downloader_label_name") != saved_config.get("downloader_label_name")
             or config.get("qb_added_command") != saved_config.get("qb_added_command")
             or config.get("qb_completed_command") != saved_config.get("qb_completed_command")
             or "qb_auto_tag_enabled" not in saved_config
             or "qb_tag_name" not in saved_config
+            or "release_name_template" not in saved_config
         ):
             self.update_config(config)
 
@@ -217,7 +227,7 @@ class DownloadAddedNotify(_PluginBase):
             ("类别", category),
             ("标签", tags),
             ("名称", compact_name),
-            ("下载器", downloader),
+            ("下载器", self._format_downloader_label(downloader)),
             ("目录", save_path),
         )
         if self._include_raw_summary:
@@ -287,7 +297,7 @@ class DownloadAddedNotify(_PluginBase):
                     ),
                 ),
             ),
-            ("下载器", downloader),
+            ("下载器", self._format_downloader_label(downloader)),
             ("源文件", source_path),
             ("入库位置", target_path),
         )
@@ -410,7 +420,7 @@ class DownloadAddedNotify(_PluginBase):
                     episode=episode,
                 ),
             ),
-            ("下载器", downloader),
+            ("下载器", self._format_downloader_label(downloader)),
             ("目录", save_path),
         )
         if self._include_raw_summary:
@@ -483,7 +493,7 @@ class DownloadAddedNotify(_PluginBase):
             ("类别", category),
             ("标签", tags),
             ("名称", self._compact_name(title)),
-            ("下载器", downloader),
+            ("下载器", self._format_downloader_label(downloader)),
             ("目录", save_path),
         )
         if self._include_raw_summary:
@@ -529,6 +539,20 @@ class DownloadAddedNotify(_PluginBase):
                                 "props": {"cols": 12, "md": 6},
                                 "content": [
                                     {
+                                        "component": "VTextField",
+                                        "props": {
+                                            "model": "downloader_label_name",
+                                            "label": "下载器标签名称",
+                                            "placeholder": "例如 QB-电影，留空显示原下载器名",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12, "md": 6},
+                                "content": [
+                                    {
                                         "component": "VSwitch",
                                         "props": {
                                             "model": "qb_auto_tag_enabled",
@@ -560,7 +584,7 @@ class DownloadAddedNotify(_PluginBase):
                                         "props": {
                                             "model": "qb_web_url",
                                             "label": "qBittorrent Web 地址",
-                                            "placeholder": "http://192.168.2.118:8080",
+                                            "placeholder": "http://127.0.0.1:8080",
                                         },
                                     }
                                 ],
@@ -705,6 +729,20 @@ class DownloadAddedNotify(_PluginBase):
                                     {
                                         "component": "VTextField",
                                         "props": {
+                                            "model": "release_name_template",
+                                            "label": "名称标签模板",
+                                            "placeholder": "{title} | {resolution}{fps_part} | {audio} | {group}",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VCol",
+                                "props": {"cols": 12},
+                                "content": [
+                                    {
+                                        "component": "VTextField",
+                                        "props": {
                                             "model": "header_image_url",
                                             "label": "推送头图 URL",
                                             "placeholder": "填写图片直链，留空则不推送头图",
@@ -831,12 +869,14 @@ class DownloadAddedNotify(_PluginBase):
             "external_notify_token": "",
             "moviepilot_base_url": "http://moviepilot:3001",
             "qb_downloader_name": "Qbittorrent",
+            "downloader_label_name": "",
             "header_image_url": "",
             "qb_auto_tag_enabled": True,
             "qb_web_url": "",
             "qb_username": "",
             "qb_password": "",
             "qb_tag_name": "MOVIEPILOT",
+            "release_name_template": "{title} | {resolution}{fps_part} | {audio} | {group}",
             "qb_added_command": "",
             "qb_completed_command": "",
         }
@@ -883,10 +923,12 @@ class DownloadAddedNotify(_PluginBase):
                             self._page_text("qb_tag_name", "自动标签名称", self._qb_tag_name, 3),
                             self._page_text("moviepilot_base_url", "MoviePilot 地址", self._moviepilot_base_url, 6),
                             self._page_text("qb_downloader_name", "下载器名称", self._qb_downloader_name, 3),
+                            self._page_text("downloader_label_name", "下载器标签名称", self._downloader_label_name, 3),
                             self._page_text("qb_poll_interval", "轮询间隔（秒）", self._qb_poll_interval, 3),
                             self._page_text("notify_stage", "通知时机", self._format_notify_stage(), 3),
                             self._page_text("notify_type", "通知类型", self._notify_type, 3),
                             self._page_text("only_downloader", "只通知下载器", self._only_downloader or "全部", 3),
+                            self._page_text("release_name_template", "名称标签模板", self._release_name_template, 12),
                             self._page_text("header_image_url", "推送头图 URL", self._header_image_url or "未设置", 3),
                             self._page_switch(
                                 "external_notify_enabled",
@@ -1521,12 +1563,44 @@ class DownloadAddedNotify(_PluginBase):
         info = cls._parse_release_name(value)
         if not info:
             return None
-        title = info.get("title_zh") or info.get("title_en")
-        quality = " ".join(item for item in (info.get("resolution"), info.get("fps")) if item)
-        audio = cls._format_release_audio(info.get("audio"))
-        group = cls._format_release_group(info.get("group"))
-        parts = [part for part in (title, quality, audio, group) if part]
-        return " | ".join(parts) or None
+        return cls._format_release_name_by_template(info)
+
+    @classmethod
+    def _format_release_name_by_template(cls, info: Dict[str, str]) -> Optional[str]:
+        variables = cls._release_name_variables(info)
+        template = cls._release_name_template or "{title} | {resolution}{fps_part} | {audio} | {group}"
+
+        def replace_var(match: re.Match) -> str:
+            return variables.get(match.group(1), "") or ""
+
+        text = re.sub(r"\{([a-zA-Z0-9_]+)\}", replace_var, template)
+        parts = [re.sub(r"\s+", " ", part).strip(" -_/") for part in text.split("|")]
+        return " | ".join(part for part in parts if part) or None
+
+    @classmethod
+    def _release_name_variables(cls, info: Dict[str, str]) -> Dict[str, str]:
+        title = info.get("title_zh") or info.get("title_en") or ""
+        audio = cls._format_release_audio(info.get("audio")) or ""
+        group = cls._format_release_group(info.get("group")) or ""
+        release_tag = cls._format_release_tag(info) or ""
+        fps = info.get("fps") or ""
+        return {
+            "title": title,
+            "title_zh": info.get("title_zh") or "",
+            "title_en": info.get("title_en") or "",
+            "year": info.get("year") or "",
+            "season": info.get("season") or "",
+            "episode": f"E{int(info['episode']):02d}" if info.get("episode") else "",
+            "resolution": info.get("resolution") or "",
+            "source": info.get("source") or "",
+            "codec": info.get("codec") or "",
+            "quality": info.get("quality") or "",
+            "fps": fps,
+            "fps_part": f" {fps}" if fps else "",
+            "audio": audio,
+            "group": group,
+            "release_tag": release_tag,
+        }
 
     @staticmethod
     def _format_release_audio(value: Any) -> Optional[str]:
@@ -1544,6 +1618,17 @@ class DownloadAddedNotify(_PluginBase):
         if "@" in text:
             text = text.rsplit("@", 1)[-1]
         return text or None
+
+    @classmethod
+    def _format_release_tag(cls, info: Dict[str, str]) -> Optional[str]:
+        release_tag = info.get("release_tag")
+        if release_tag:
+            return release_tag
+        audio = info.get("audio")
+        group = info.get("group")
+        if audio and group and "@" in str(group):
+            return f"{audio}-{str(group).split('@', 1)[0]}"
+        return None
 
     @classmethod
     def _parse_release_name(cls, value: Any) -> Optional[Dict[str, str]]:
@@ -1580,6 +1665,7 @@ class DownloadAddedNotify(_PluginBase):
             space_pattern = (
                 r"^(?:(?P<title_zh>[\u4e00-\u9fff][^\s]*)\s+)?"
                 r"(?P<title_en>.+?)\s+"
+                r"(?:(?P<season>S\d{1,2})(?:E(?P<episode>\d{1,3}))?\s+)?"
                 r"(?P<year>\d{4})\s+"
                 r"(?P<resolution>\d{3,4}p)\s+"
                 r"(?P<source>\S+)\s+"
@@ -1597,7 +1683,26 @@ class DownloadAddedNotify(_PluginBase):
             info["season"] = info["season"].upper()
         if "resolution" in info:
             info["resolution"] = info["resolution"].lower()
+        cls._normalize_space_release_info(info)
         return info
+
+    @classmethod
+    def _normalize_space_release_info(cls, info: Dict[str, str]):
+        audio = info.get("audio")
+        group = info.get("group")
+        if not audio or not group or "@" not in group:
+            return
+        if re.match(r"^(H\.?26[45]|HEVC|AVC|x26[45])$", audio, re.IGNORECASE):
+            info["release_tag"] = f"{audio}-{group.split('@', 1)[0]}"
+            if info.get("codec") and cls._looks_like_audio(info["codec"]):
+                info["audio"] = info["codec"]
+            info["codec"] = audio
+
+    @staticmethod
+    def _looks_like_audio(value: Any) -> bool:
+        if not value:
+            return False
+        return bool(re.match(r"^(DTS|TrueHD|DDP?|AAC|AC3)", str(value), re.IGNORECASE))
 
     @staticmethod
     def _format_qb_state(state: Any) -> Optional[str]:
@@ -1625,6 +1730,9 @@ class DownloadAddedNotify(_PluginBase):
             "uploading": "做种中",
         }
         return state_map.get(text.lower(), text)
+
+    def _format_downloader_label(self, downloader: Any) -> Optional[str]:
+        return self._downloader_label_name or self._clean_message_value(downloader)
 
     @staticmethod
     def _extract_quality(title: Any) -> Optional[str]:
