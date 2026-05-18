@@ -50,7 +50,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.16"
+    plugin_version = "0.1.17"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1017,7 +1017,7 @@ class DownloadAddedNotify(_PluginBase):
             "external_notify_enabled",
             "external_notify_token",
         )
-        return {field: f"{{{{ {field} }}}}" for field in fields}
+        return {field: f"{{{{{field}}}}}" for field in fields}
 
     def _page_config_from_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         current = self.get_config() or {}
