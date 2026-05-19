@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.2.3"
+    plugin_version = "0.2.4"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1483,6 +1483,41 @@ class DownloadAddedNotify(_PluginBase):
 
     @classmethod
     def _extract_explicit_episode_text(cls, value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        if isinstance(value, dict):
+            direct = cls._first_raw_value(
+                value,
+                "season_episode",
+                "season_episode_text",
+                "episode_text",
+                "download_episodes",
+                "episodes",
+                "name",
+                "title",
+                "org_string",
+                "original_name",
+                "subtitle",
+                "path",
+                "content_path",
+                "contentPath",
+                "file_path",
+            )
+            explicit = cls._extract_explicit_episode_text(direct)
+            if explicit:
+                return explicit
+            for key in ("name", "title", "org_string", "original_name", "subtitle"):
+                explicit = cls._extract_explicit_episode_text(value.get(key))
+                if explicit:
+                    return explicit
+            return None
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                explicit = cls._extract_explicit_episode_text(item)
+                if explicit:
+                    return explicit
+            return None
+
         text = cls._clean_message_value(value)
         if not text:
             return None
@@ -1527,9 +1562,10 @@ class DownloadAddedNotify(_PluginBase):
 
     @classmethod
     def _extract_episode_summary(cls, *values: Any) -> Optional[str]:
-        title_episode = cls._extract_explicit_episode_text(values[0]) if values else None
-        if title_episode:
-            return title_episode
+        for value in values:
+            explicit_episode = cls._extract_explicit_episode_text(value)
+            if explicit_episode:
+                return explicit_episode
         season_hint = None
         episode_pairs = []
         for value in values:
