@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.2.4"
+    plugin_version = "0.2.5"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1598,10 +1598,42 @@ class DownloadAddedNotify(_PluginBase):
         if season:
             if episodes == list(range(min(episodes), max(episodes) + 1)):
                 return f"S{season:02d}E{min(episodes):02d}-E{max(episodes):02d}"
+            dominant_run = cls._dominant_episode_run(episodes)
+            if dominant_run:
+                return f"S{season:02d}E{dominant_run[0]:02d}-E{dominant_run[-1]:02d}"
             return f"S{season:02d}" + ",".join(f"E{episode:02d}" for episode in episodes)
         if episodes == list(range(min(episodes), max(episodes) + 1)):
             return f"E{min(episodes):02d}-E{max(episodes):02d}"
+        dominant_run = cls._dominant_episode_run(episodes)
+        if dominant_run:
+            return f"E{dominant_run[0]:02d}-E{dominant_run[-1]:02d}"
         return ",".join(f"E{episode:02d}" for episode in episodes)
+
+    @staticmethod
+    def _dominant_episode_run(episodes: List[int]) -> Optional[List[int]]:
+        if len(episodes) < 5:
+            return None
+
+        runs = []
+        current = [episodes[0]]
+        for episode in episodes[1:]:
+            if episode == current[-1] + 1:
+                current.append(episode)
+            else:
+                runs.append(current)
+                current = [episode]
+        runs.append(current)
+
+        longest = max(runs, key=len)
+        outliers = [episode for episode in episodes if episode not in set(longest)]
+        if len(longest) < 4 or len(outliers) != 1:
+            return None
+
+        outlier = outliers[0]
+        nearest_gap = min(abs(outlier - longest[0]), abs(outlier - longest[-1]))
+        if nearest_gap >= 3:
+            return longest
+        return None
 
     @classmethod
     def _collect_episode_pairs(cls, value: Any, season_hint: Optional[int] = None) -> List[tuple]:
