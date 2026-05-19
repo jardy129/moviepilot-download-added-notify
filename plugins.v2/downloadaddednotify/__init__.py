@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.2.0"
+    plugin_version = "0.2.1"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -66,7 +66,7 @@ class DownloadAddedNotify(_PluginBase):
     _only_downloader = ""
     _include_raw_summary = False
     _qb_poll_enabled = True
-    _qb_poll_interval = 60
+    _qb_poll_interval = 15
     _qb_seen_hashes_key = "qb_seen_hashes"
     _external_notify_enabled = True
     _external_notify_token = ""
@@ -120,7 +120,9 @@ class DownloadAddedNotify(_PluginBase):
         self._only_downloader = (config.get("only_downloader") or "").strip()
         self._include_raw_summary = bool(config.get("include_raw_summary"))
         self._qb_poll_enabled = bool(config.get("qb_poll_enabled", True))
-        self._qb_poll_interval = self._safe_int(config.get("qb_poll_interval"), 60, 15)
+        if str(config.get("qb_poll_interval", "")).strip() == "60":
+            config["qb_poll_interval"] = 15
+        self._qb_poll_interval = self._safe_int(config.get("qb_poll_interval"), 15, 5)
         self._external_notify_enabled = bool(config.get("external_notify_enabled", True))
         self._external_notify_token = (config.get("external_notify_token") or "").strip()
         self._moviepilot_base_url = (config.get("moviepilot_base_url") or "http://moviepilot:3001").strip()
@@ -223,7 +225,7 @@ class DownloadAddedNotify(_PluginBase):
             meta_data,
             media_data,
             data,
-            self._qb_torrent_file_names(torrent_hash),
+            self._qb_torrent_file_names_if_needed(torrent_hash, title, save_path),
             self._extract_episode_from_download_path(save_path),
         )
 
@@ -412,7 +414,7 @@ class DownloadAddedNotify(_PluginBase):
         episode = self._extract_episode_summary(
             title,
             torrent_data,
-            self._qb_torrent_file_names(torrent_hash),
+            self._qb_torrent_file_names_if_needed(torrent_hash, title, content_path, save_path),
             self._extract_episode_from_download_path(content_path),
             self._extract_episode_from_download_path(save_path),
         )
@@ -492,7 +494,7 @@ class DownloadAddedNotify(_PluginBase):
         episode = self._extract_episode_summary(
             title,
             payload,
-            self._qb_torrent_file_names(torrent_hash),
+            self._qb_torrent_file_names_if_needed(torrent_hash, title, content_path, save_path),
             self._extract_episode_from_download_path(content_path),
             self._extract_episode_from_download_path(save_path),
         )
@@ -807,8 +809,8 @@ class DownloadAddedNotify(_PluginBase):
                                             "model": "qb_poll_interval",
                                             "label": "Qbittorrent 轮询间隔（秒）",
                                             "type": "number",
-                                            "min": 15,
-                                            "placeholder": "60",
+                                            "min": 5,
+                                            "placeholder": "15",
                                         },
                                     }
                                 ],
@@ -887,7 +889,7 @@ class DownloadAddedNotify(_PluginBase):
             "only_downloader": "",
             "include_raw_summary": False,
             "qb_poll_enabled": True,
-            "qb_poll_interval": 60,
+            "qb_poll_interval": 15,
             "external_notify_enabled": True,
             "external_notify_token": "",
             "moviepilot_base_url": "http://moviepilot:3001",
@@ -1136,7 +1138,7 @@ class DownloadAddedNotify(_PluginBase):
                 data=login_data,
                 method="POST",
             )
-            with urlopen(login_request, timeout=10) as response:
+            with urlopen(login_request, timeout=3) as response:
                 cookie = response.headers.get("Set-Cookie", "").split(";", 1)[0]
                 login_body = response.read().decode(errors="ignore").strip()
 
@@ -1154,12 +1156,20 @@ class DownloadAddedNotify(_PluginBase):
                 headers={"Cookie": cookie},
                 method="POST",
             )
-            with urlopen(tag_request, timeout=10) as response:
+            with urlopen(tag_request, timeout=3) as response:
                 response.read()
 
             logger.info(f"{self.plugin_name}: 已尝试为 {torrent_hash} 添加 qBittorrent 标签 {tag_name}")
         except Exception as err:
             logger.error(f"{self.plugin_name}: 自动添加 qBittorrent 标签失败 - {err}", exc_info=True)
+
+    def _qb_torrent_file_names_if_needed(self, torrent_hash: Optional[str], title: Any, *known_values: Any) -> List[str]:
+        release_info = self._parse_release_name(title)
+        if not release_info or not release_info.get("season") or release_info.get("episode"):
+            return []
+        if self._extract_episode(title, *known_values):
+            return []
+        return self._qb_torrent_file_names(torrent_hash)
 
     def _qb_torrent_file_names(self, torrent_hash: Optional[str]) -> List[str]:
         if not torrent_hash or not self._qb_web_url or not self._qb_username or not self._qb_password:
@@ -1176,7 +1186,7 @@ class DownloadAddedNotify(_PluginBase):
                 data=login_data,
                 method="POST",
             )
-            with urlopen(login_request, timeout=10) as response:
+            with urlopen(login_request, timeout=2) as response:
                 cookie = response.headers.get("Set-Cookie", "").split(";", 1)[0]
                 login_body = response.read().decode(errors="ignore").strip()
             if not cookie or login_body.lower().startswith("fails"):
@@ -1184,7 +1194,7 @@ class DownloadAddedNotify(_PluginBase):
 
             files_url = f"{base_url}/api/v2/torrents/files?{urlencode({'hash': torrent_hash})}"
             files_request = UrlRequest(files_url, headers={"Cookie": cookie}, method="GET")
-            with urlopen(files_request, timeout=10) as response:
+            with urlopen(files_request, timeout=2) as response:
                 files = json.loads(response.read().decode(errors="ignore") or "[]")
             if not isinstance(files, list):
                 return []
@@ -1790,7 +1800,8 @@ class DownloadAddedNotify(_PluginBase):
         if not value:
             return None
         text = str(value).strip()
-        match = re.match(r"^(DTS\d(?:\.\d)?|DDP?\d(?:\.\d)?|AAC|AC3)", text, re.IGNORECASE)
+        text = re.sub(r"^(DTS-HD)\.MA\.(\d(?:\.\d)?)$", r"\1 MA \2", text, flags=re.IGNORECASE)
+        match = re.match(r"^(DTS-HD(?:\s+MA)?(?:\s+\d(?:\.\d)?)?|TrueHD(?:\s+\d(?:\.\d)?)?|DTS\d(?:\.\d)?|DDP?\d(?:\.\d)?|AAC|AC3)", text, re.IGNORECASE)
         return match.group(1) if match else text
 
     @staticmethod
@@ -1859,13 +1870,18 @@ class DownloadAddedNotify(_PluginBase):
                 break
         if not match:
             title_prefix = (
-                r"^(?:(?P<title_zh>[\u4e00-\u9fff][^.]+)\.)?"
+                r"^(?:(?P<title_zh>[\u4e00-\u9fff][^.\s]+)(?:\.|\s+))?"
                 r"(?P<title_en>.+?)\s+"
                 r"(?:(?P<season>S\d{1,2})(?:E(?P<episode>\d{1,3}))?\s+)?"
                 r"(?P<year>\d{4})\s+"
                 r"(?P<resolution>\d{3,4}p)\s+"
             )
             space_patterns = (
+                title_prefix
+                + r"(?P<source>.+?)\s+"
+                + r"(?P<codec>H\.?26[45]|HEVC|AVC|x26[45])\s+"
+                + r"(?P<audio>DTS-HD(?:\s+MA)?(?:\s+\d(?:\.\d)?)?|TrueHD(?:\s+\d(?:\.\d)?)?|DDP?\d(?:\.\d)?|AAC|AC3)"
+                + r"-(?P<group>.+)$",
                 title_prefix
                 + r"(?P<source>.+?)\s+"
                 + r"(?P<codec>H\.?26[45]|HEVC|AVC|x26[45])\s+"
@@ -1898,6 +1914,18 @@ class DownloadAddedNotify(_PluginBase):
 
     @classmethod
     def _normalize_release_info(cls, info: Dict[str, str]):
+        codec = info.get("codec")
+        quality = info.get("quality")
+        audio = info.get("audio")
+        group = info.get("group")
+        if quality and audio and group and re.match(r"^DTS-HD$", quality, re.IGNORECASE):
+            audio_head = str(audio)
+            if "-" in audio_head:
+                audio_head, group_prefix = audio_head.rsplit("-", 1)
+                info["group"] = f"{group_prefix}-{group}"
+            info["audio"] = f"{quality}.{audio_head}"
+            info.pop("quality", None)
+
         codec = info.get("codec")
         quality = info.get("quality")
         audio = info.get("audio")
