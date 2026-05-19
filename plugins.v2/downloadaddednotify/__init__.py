@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.2.1"
+    plugin_version = "0.2.2"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1418,6 +1418,7 @@ class DownloadAddedNotify(_PluginBase):
     @classmethod
     def _ensure_title_year(cls, title: Any, year: Any = None) -> str:
         text = cls._clean_message_value(title) or "未知任务"
+        text = cls._strip_title_brackets(text)
         if re.search(r"\(\d{4}\)", text):
             return text
         title_year = year or cls._extract_year(text)
@@ -1772,14 +1773,14 @@ class DownloadAddedNotify(_PluginBase):
 
     @classmethod
     def _release_name_variables(cls, info: Dict[str, str]) -> Dict[str, str]:
-        title = info.get("title_zh") or info.get("title_en") or ""
+        title = cls._strip_title_brackets(info.get("title_zh") or info.get("title_en") or "")
         audio = cls._format_release_audio(info.get("audio")) or ""
         group = cls._format_release_group(info.get("group")) or ""
         release_tag = cls._format_release_tag(info) or ""
         fps = info.get("fps") or ""
         return {
             "title": title,
-            "title_zh": info.get("title_zh") or "",
+            "title_zh": cls._strip_title_brackets(info.get("title_zh") or ""),
             "title_en": info.get("title_en") or "",
             "year": info.get("year") or "",
             "season": info.get("season") or "",
@@ -1903,6 +1904,8 @@ class DownloadAddedNotify(_PluginBase):
         if not match:
             return None
         info = {key: value for key, value in match.groupdict().items() if value}
+        if "title_zh" in info:
+            info["title_zh"] = cls._strip_title_brackets(info["title_zh"])
         if "title_en" in info:
             info["title_en"] = info["title_en"].replace(".", " ").strip()
         if "season" in info:
@@ -1914,6 +1917,20 @@ class DownloadAddedNotify(_PluginBase):
 
     @classmethod
     def _normalize_release_info(cls, info: Dict[str, str]):
+        codec = info.get("codec")
+        if codec and not info.get("audio"):
+            packed_match = re.match(
+                r"^(?P<codec>H\.?26[45]|HEVC|AVC|x26[45])(?:\.(?P<quality>[^.]+))?\.(?P<audio>.+?)-(?P<group>[^-]+)$",
+                str(codec),
+                re.IGNORECASE,
+            )
+            if packed_match:
+                info["codec"] = packed_match.group("codec")
+                if packed_match.group("quality"):
+                    info["quality"] = packed_match.group("quality")
+                info["audio"] = packed_match.group("audio")
+                info["group"] = packed_match.group("group")
+
         codec = info.get("codec")
         quality = info.get("quality")
         audio = info.get("audio")
@@ -2213,6 +2230,7 @@ class DownloadAddedNotify(_PluginBase):
         text = cls._clean_message_value(value)
         if not text:
             return None
+        text = cls._strip_title_brackets(text)
         text = re.sub(r"[._]+", " ", text).strip()
         if prefer_chinese:
             chinese_match = re.match(r"^([\u4e00-\u9fff][\u4e00-\u9fff\s·、，,：:《》「」『』!！?？-]*)\s+[A-Za-z]", text)
@@ -2226,6 +2244,18 @@ class DownloadAddedNotify(_PluginBase):
         text = re.sub(r"[-_\s.]+$", "", text).strip()
         text = re.sub(r"\s+", " ", text)
         return text or None
+
+    @staticmethod
+    def _strip_title_brackets(value: Any) -> str:
+        text = str(value or "").strip()
+        for pattern in (
+            r"^[\[\【\(\（]\s*([\u4e00-\u9fff][^\]\】\)\）]*)\s*[\]\】\)\）](?:\s+[A-Za-z].*)?$",
+            r"^[\[\【]\s*(.*?)\s*[\]\】]$",
+        ):
+            match = re.match(pattern, text)
+            if match:
+                return match.group(1).strip()
+        return text
 
     @staticmethod
     def _has_cjk(value: str) -> bool:
