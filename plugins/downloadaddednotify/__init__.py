@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.2.5"
+    plugin_version = "0.2.6"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1922,8 +1922,16 @@ class DownloadAddedNotify(_PluginBase):
         if not value:
             return None
         text = str(value).strip()
+        text = re.sub(r"(\d)\.(\d)", r"\1__DOT__\2", text)
+        text = text.replace(".", " ").replace("__DOT__", ".")
         text = re.sub(r"^(DTS-HD)\.MA\.(\d(?:\.\d)?)$", r"\1 MA \2", text, flags=re.IGNORECASE)
-        match = re.match(r"^(DTS-HD(?:\s+MA)?(?:\s+\d(?:\.\d)?)?|TrueHD(?:\s+\d(?:\.\d)?)?|DTS\d(?:\.\d)?|DDP?\d(?:\.\d)?|AAC|AC3)", text, re.IGNORECASE)
+        match = re.search(
+            r"((?:Atmos\s+)?DTS-HD(?:\s+MA)?(?:\s+\d(?:\.\d)?)?|"
+            r"(?:Atmos\s+)?TrueHD(?:\s+\d(?:\.\d)?)?|"
+            r"DTS\d(?:\.\d)?|DDP?\d(?:\.\d)?|AAC|AC3)",
+            text,
+            re.IGNORECASE,
+        )
         return match.group(1) if match else text
 
     @staticmethod
@@ -1968,6 +1976,11 @@ class DownloadAddedNotify(_PluginBase):
         root, ext = os.path.splitext(basename)
         if ext.lower() in cls._video_extensions:
             basename = root
+        basename = re.sub(
+            r"^[\[\【]\s*(?P<title_zh>[\u4e00-\u9fff][^\]\】]+?)\s*[\]\】]\s*(?P<title_en>[A-Za-z][^.]+)\.",
+            r"\g<title_zh>.\g<title_en>.",
+            basename,
+        )
         base_pattern = (
             r"(?P<year>\d{4})\."
             r"(?P<resolution>\d{3,4}p)\."
@@ -1979,6 +1992,12 @@ class DownloadAddedNotify(_PluginBase):
             r"(?:-(?P<group>[^.-]+))?$"
         )
         patterns = (
+            rf"^(?P<title_zh>[\u4e00-\u9fff][^.]+)\.(?P<title_en>.+?)\."
+            rf"(?P<year>\d{{4}})\.(?P<source>.+?)\.(?P<resolution>\d{{3,4}}p)\."
+            rf"(?P<codec>H\.?26[45]|HEVC|AVC|x26[45])\.(?P<audio>.+?)-(?P<group>[^.-]+)$",
+            rf"^(?P<title_en>.+?)\."
+            rf"(?P<year>\d{{4}})\.(?P<source>.+?)\.(?P<resolution>\d{{3,4}}p)\."
+            rf"(?P<codec>H\.?26[45]|HEVC|AVC|x26[45])\.(?P<audio>.+?)-(?P<group>[^.-]+)$",
             rf"^(?P<title_zh>[\u4e00-\u9fff][^.]+)\."
             rf"(?P<title_en>.+?)\."
             rf"(?P<season>S\d{{1,2}})(?:E(?P<episode>\d{{1,3}})(?:[-_.]?E?(?P<episode_end>\d{{1,3}}))?)?\.{base_pattern}",

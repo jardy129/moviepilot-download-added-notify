@@ -2,13 +2,14 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.2.5",
+    "version": "0.2.6",
     "icon": "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png",
     "author": "jardy",
     "author_url": "https://github.com/jardy129/",
     "level": 0,
     "v2": true,
     "history": {
+      "v0.2.6": "修正方括号中文加英文电影标题解析，标题和名称优先显示中文片名",
       "v0.2.5": "多文件集数存在连续主段和孤立误判集数时优先显示连续主段",
       "v0.2.4": "修正媒体标题与种子标题分离时明确集数范围未优先生效的问题",
       "v0.2.3": "优先使用标题内明确集数范围，避免多文件种子混入额外集数",
