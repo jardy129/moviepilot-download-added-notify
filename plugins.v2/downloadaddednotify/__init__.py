@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.3.1"
+    plugin_version = "0.3.2"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -2039,6 +2039,9 @@ class DownloadAddedNotify(_PluginBase):
             rf"(?P<year>\d{{4}})\.(?P<source>.+?)\.(?P<resolution>\d{{3,4}}p)\."
             rf"(?P<codec>H\.?26[45]|HEVC|AVC|x26[45])\.(?P<audio>.+?)-(?P<group>[^.-]+)$",
             rf"^(?P<title_en>.+?)\."
+            rf"(?P<year>\d{{4}})\.(?P<edition>V\d+)\.(?P<source>.+?)\.(?P<resolution>\d{{3,4}}p)\."
+            rf"(?P<codec>H\.?26[45]|HEVC|AVC|x26[45])\.(?P<audio>.+?)-(?P<group>[^.-]+)$",
+            rf"^(?P<title_en>.+?)\."
             rf"(?P<year>\d{{4}})\.(?P<source>.+?)\.(?P<resolution>\d{{3,4}}p)\."
             rf"(?P<codec>H\.?26[45]|HEVC|AVC|x26[45])\.(?P<audio>.+?)-(?P<group>[^.-]+)$",
             rf"^(?P<title_zh>[\u4e00-\u9fff][^.]+)\."
@@ -2057,7 +2060,7 @@ class DownloadAddedNotify(_PluginBase):
                 r"^(?:(?P<title_zh>[\u4e00-\u9fff][^.\s]+)(?:\.|\s+))?"
                 r"(?P<title_en>.+?)\s+"
                 r"(?:(?P<season>S\d{1,2})(?:E(?P<episode>\d{1,3})(?:[-~–—]E?(?P<episode_end>\d{1,3}))?)?\s+)?"
-                r"(?P<year>\d{4})\s+"
+                r"(?P<year>\d{4})(?:\s+(?P<edition>V\d+))?\s+"
                 r"(?P<resolution>\d{3,4}p)\s+"
             )
             space_patterns = (
@@ -2090,7 +2093,8 @@ class DownloadAddedNotify(_PluginBase):
         if "title_zh" in info:
             info["title_zh"] = cls._strip_title_brackets(info["title_zh"])
         if "title_en" in info:
-            info["title_en"] = info["title_en"].replace(".", " ").strip()
+            info["title_en"] = re.sub(r"[，,._]+", " ", info["title_en"]).strip()
+            info["title_en"] = re.sub(r"\s+", " ", info["title_en"])
         if "season" in info:
             info["season"] = info["season"].upper()
         if "resolution" in info:
