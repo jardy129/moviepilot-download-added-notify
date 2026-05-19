@@ -18,7 +18,7 @@
 - 本地仓库：`/Users/jardy/Documents/Codex/2026-05-16/moviepilot-qb/moviepilot-download-added-notify`
 - GitHub：`git@github.com:jardy129/moviepilot-download-added-notify.git`
 - 主分支：`main`
-- 当前最新版本：`0.3.5`
+- 当前最新版本：`0.3.6`
 - 最新提交：以 `git log -1 --oneline` 为准
 
 主要文件：
@@ -60,7 +60,7 @@ MoviePilot 日志里看到，qB 传给插件的 `%N` 经常不是完整种子名
 3. `content_path` 或 `save_path` 中的文件名/目录名。
 4. qB 传入的短任务名。
 
-## 当前 0.3.5 的关键逻辑
+## 当前 0.3.6 的关键逻辑
 
 新增/调整的关键方法：
 
@@ -78,6 +78,8 @@ MoviePilot 日志里看到，qB 传给插件的 `%N` 经常不是完整种子名
 核心策略：
 
 - qB 任务名不完整时，主动调用 qB Web API 获取文件列表。
+- qB hash 取文件列表失败时，会按任务名反查 qB 当前任务 hash 再取文件列表。
+- 短中文片名无法识别年份时，会尝试别名识别，例如 `封神2` -> `封神第二部`，但展示仍保留用户看到的短中文名。
 - 标题只有季信息时，即使 `content_path` 里出现单集号，也优先查询 qB 文件列表合并多文件集数区间。
 - 文件列表中如果是原盘结构，忽略 `00000.m2ts` 这种无意义文件名，取上层发布目录名。
 - 解析标题优先用完整文件名，但展示标题继续优先中文短名。

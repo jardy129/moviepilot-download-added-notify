@@ -52,7 +52,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.3.5"
+    plugin_version = "0.3.6"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1270,6 +1270,12 @@ class DownloadAddedNotify(_PluginBase):
                 recognized = cls._moviepilot_recognize(meta)
                 if recognized:
                     result.update({key: value for key, value in recognized.items() if value})
+            if not result.get("year"):
+                alias_recognized = cls._moviepilot_recognize_alias(title_text, original_title)
+                if alias_recognized:
+                    for key, value in alias_recognized.items():
+                        if value and not result.get(key):
+                            result[key] = value
 
         local_release = cls._parse_release_name(title_text)
         original_release = cls._parse_release_name(original_title)
@@ -1410,6 +1416,59 @@ class DownloadAddedNotify(_PluginBase):
         }
 
     @classmethod
+    def _moviepilot_recognize_alias(cls, *values: Any) -> Dict[str, str]:
+        try:
+            from app.core.metainfo import MetaInfo
+        except Exception:
+            return {}
+        for alias in cls._recognition_aliases(*values):
+            try:
+                recognized = cls._moviepilot_recognize(MetaInfo(alias))
+            except Exception:
+                recognized = {}
+            if recognized and recognized.get("year"):
+                return recognized
+        return {}
+
+    @classmethod
+    def _recognition_aliases(cls, *values: Any) -> List[str]:
+        aliases = []
+        for value in values:
+            text = cls._clean_message_value(value)
+            if not text:
+                continue
+            simple_title = cls._simple_cjk_title(text) or text
+            match = re.fullmatch(r"(.+?)(\d+)", simple_title)
+            if match:
+                prefix, number = match.groups()
+                chinese_number = cls._chinese_number(number)
+                if chinese_number:
+                    aliases.append(f"{prefix}第{chinese_number}部")
+            if re.search(r"封神\s*2", simple_title, re.IGNORECASE):
+                aliases.append("封神第二部")
+        return list(dict.fromkeys(alias for alias in aliases if alias))
+
+    @staticmethod
+    def _chinese_number(value: Any) -> Optional[str]:
+        try:
+            number = int(str(value))
+        except (TypeError, ValueError):
+            return None
+        mapping = {
+            1: "一",
+            2: "二",
+            3: "三",
+            4: "四",
+            5: "五",
+            6: "六",
+            7: "七",
+            8: "八",
+            9: "九",
+            10: "十",
+        }
+        return mapping.get(number)
+
+    @classmethod
     def _moviepilot_episode_from_metas(cls, metas: List[Any]) -> Optional[str]:
         pairs = []
         season = None
@@ -1548,6 +1607,8 @@ class DownloadAddedNotify(_PluginBase):
         if not file_names and torrent_hash:
             time.sleep(0.8)
             file_names = self._qb_torrent_file_names(torrent_hash)
+        if not file_names:
+            file_names = self._qb_torrent_file_names_by_title(title)
         parse_title = self._best_parse_title(title, file_names=file_names, path=next((value for value in known_values if value), None))
         title_text = self._clean_message_value(title)
         if file_names and parse_title and title_text and parse_title != title_text:
@@ -1623,6 +1684,88 @@ class DownloadAddedNotify(_PluginBase):
         except Exception as err:
             logger.warn(f"{self.plugin_name}: 获取 qBittorrent 文件列表失败 - {err}")
             return []
+
+    def _qb_torrent_file_names_by_title(self, title: Any) -> List[str]:
+        if not title or not self._qb_web_url or not self._qb_username or not self._qb_password:
+            return []
+        title_text = self._clean_message_value(title)
+        if not title_text:
+            return []
+
+        base_url = self._qb_web_url.rstrip("/")
+        try:
+            cookie = self._qb_login_cookie(base_url)
+            if not cookie:
+                return []
+
+            info_request = UrlRequest(
+                f"{base_url}/api/v2/torrents/info",
+                headers={"Cookie": cookie},
+                method="GET",
+            )
+            with urlopen(info_request, timeout=3) as response:
+                torrents = json.loads(response.read().decode(errors="ignore") or "[]")
+            if not isinstance(torrents, list):
+                return []
+
+            title_key = self._match_key(title_text)
+            best_hash = None
+            best_score = 0
+            for item in torrents:
+                if not isinstance(item, dict):
+                    continue
+                name = self._clean_message_value(item.get("name"))
+                torrent_hash = self._clean_message_value(item.get("hash"))
+                if not name or not torrent_hash:
+                    continue
+                score = self._title_match_score(title_key, self._match_key(name))
+                if score > best_score:
+                    best_score = score
+                    best_hash = torrent_hash
+            if not best_hash or best_score < 30:
+                return []
+            logger.info(f"{self.plugin_name}: 通过任务名反查 qBittorrent Hash 成功：{title_text} -> {best_hash}")
+            return self._qb_torrent_file_names(best_hash)
+        except Exception as err:
+            logger.warn(f"{self.plugin_name}: 按任务名反查 qBittorrent 文件列表失败 - {err}")
+            return []
+
+    def _qb_login_cookie(self, base_url: str) -> Optional[str]:
+        login_data = urlencode({
+            "username": self._qb_username,
+            "password": self._qb_password,
+        }).encode()
+        login_request = UrlRequest(
+            f"{base_url}/api/v2/auth/login",
+            data=login_data,
+            method="POST",
+        )
+        with urlopen(login_request, timeout=3) as response:
+            cookie = response.headers.get("Set-Cookie", "").split(";", 1)[0]
+            login_body = response.read().decode(errors="ignore").strip()
+        if not cookie or login_body.lower().startswith("fails"):
+            return None
+        return cookie
+
+    @classmethod
+    def _title_match_score(cls, source: str, candidate: str) -> int:
+        if not source or not candidate:
+            return 0
+        if source == candidate:
+            return 100
+        if source in candidate or candidate in source:
+            return min(len(source), len(candidate)) * 2
+        source_tokens = {token for token in re.split(r"[^a-z0-9\u4e00-\u9fff]+", source) if token}
+        candidate_tokens = {token for token in re.split(r"[^a-z0-9\u4e00-\u9fff]+", candidate) if token}
+        if not source_tokens or not candidate_tokens:
+            return 0
+        return len(source_tokens & candidate_tokens) * 20
+
+    @staticmethod
+    def _match_key(value: Any) -> str:
+        text = str(value or "").lower()
+        text = re.sub(r"[\W_]+", " ", text, flags=re.UNICODE)
+        return re.sub(r"\s+", " ", text).strip()
 
     @staticmethod
     def _raise_http_error(status_code: int, detail: str):
