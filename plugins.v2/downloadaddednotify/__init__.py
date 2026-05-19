@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.2.2"
+    plugin_version = "0.2.3"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1383,7 +1383,7 @@ class DownloadAddedNotify(_PluginBase):
         media_text = cls._clean_message_value(media_title)
         episode_text = cls._format_episode_text(episode) or cls._extract_episode(title)
         if release_info:
-            base_title = release_info.get("title_zh") or release_info.get("title_en")
+            base_title = media_text or release_info.get("title_zh") or release_info.get("title_en")
             release_year = year or release_info.get("year") or cls._extract_year(title)
             base = cls._ensure_title_year(base_title, release_year)
             release_episode = cls._release_episode_text(release_info, episode_text)
@@ -1441,6 +1441,9 @@ class DownloadAddedNotify(_PluginBase):
     def _release_episode_text(cls, info: Dict[str, str], fallback_episode: Optional[str] = None) -> Optional[str]:
         season = info.get("season")
         episode = info.get("episode")
+        episode_end = info.get("episode_end")
+        if season and episode and episode_end:
+            return f"{season.upper()}E{int(episode):02d}-E{int(episode_end):02d}"
         if season and episode:
             return cls._format_season_episode(season.lstrip("S"), episode)
         if season and fallback_episode:
@@ -1479,7 +1482,54 @@ class DownloadAddedNotify(_PluginBase):
         return None
 
     @classmethod
+    def _extract_explicit_episode_text(cls, value: Any) -> Optional[str]:
+        text = cls._clean_message_value(value)
+        if not text:
+            return None
+
+        range_match = re.search(
+            r"\bS(?:eason)?\s*0?(\d{1,2})\s*[-_. ]*\s*(?:E|EP|Episode)\s*0?(\d{1,3})"
+            r"\s*(?:-|~|–|—|至|到)\s*(?:E|EP|Episode)?\s*0?(\d{1,3})\b",
+            text,
+            re.IGNORECASE,
+        )
+        if range_match:
+            season = int(range_match.group(1))
+            start = int(range_match.group(2))
+            end = int(range_match.group(3))
+            if end >= start:
+                return f"S{season:02d}E{start:02d}-E{end:02d}"
+
+        list_match = re.search(
+            r"\bS(?:eason)?\s*0?(\d{1,2})\s*[-_. ]*\s*(?:E|EP|Episode)\s*0?(\d{1,3})"
+            r"(?P<tail>(?:\s*[,，]\s*(?:E|EP|Episode)?\s*0?\d{1,3})+)",
+            text,
+            re.IGNORECASE,
+        )
+        if list_match:
+            season = int(list_match.group(1))
+            episodes = [int(list_match.group(2))]
+            episodes.extend(int(item) for item in re.findall(r"(?:E|EP|Episode)?\s*0?(\d{1,3})", list_match.group("tail"), re.IGNORECASE))
+            episodes = sorted(dict.fromkeys(episodes))
+            if episodes == list(range(min(episodes), max(episodes) + 1)):
+                return f"S{season:02d}E{min(episodes):02d}-E{max(episodes):02d}"
+            return f"S{season:02d}" + ",".join(f"E{episode:02d}" for episode in episodes)
+
+        season_match = re.search(r"\bS(?:eason)?\s*0?(\d{1,2})\b", text, re.IGNORECASE)
+        total_match = re.search(r"(?:全|共)\s*(\d{1,3})\s*[集话]|全集|全季|Complete", text, re.IGNORECASE)
+        if season_match and total_match:
+            season = int(season_match.group(1))
+            if total_match.group(1):
+                return f"S{season:02d}E01-E{int(total_match.group(1)):02d}"
+            return f"S{season:02d} 全集"
+
+        return None
+
+    @classmethod
     def _extract_episode_summary(cls, *values: Any) -> Optional[str]:
+        title_episode = cls._extract_explicit_episode_text(values[0]) if values else None
+        if title_episode:
+            return title_episode
         season_hint = None
         episode_pairs = []
         for value in values:
@@ -1598,6 +1648,9 @@ class DownloadAddedNotify(_PluginBase):
             return None
 
         text = cls._stringify(value)
+        explicit = cls._extract_explicit_episode_text(text)
+        if explicit:
+            return explicit
         match = re.search(r"\bS(?:eason)?\s*0?(\d{1,2})\s*[-_. ]*\s*(?:E|EP|Episode)\s*0?(\d{1,3})\b", text, re.IGNORECASE)
         if match:
             return cls._format_season_episode(match.group(1), match.group(2))
@@ -1860,7 +1913,7 @@ class DownloadAddedNotify(_PluginBase):
         patterns = (
             rf"^(?P<title_zh>[\u4e00-\u9fff][^.]+)\."
             rf"(?P<title_en>.+?)\."
-            rf"(?P<season>S\d{{1,2}})(?:E(?P<episode>\d{{1,3}}))?\.{base_pattern}",
+            rf"(?P<season>S\d{{1,2}})(?:E(?P<episode>\d{{1,3}})(?:[-_.]?E?(?P<episode_end>\d{{1,3}}))?)?\.{base_pattern}",
             rf"^(?P<title_zh>[\u4e00-\u9fff][^.]+)\.(?P<title_en>.+?)\.{base_pattern}",
             rf"^(?P<title_en>.+?)\.{base_pattern}",
         )
@@ -1873,7 +1926,7 @@ class DownloadAddedNotify(_PluginBase):
             title_prefix = (
                 r"^(?:(?P<title_zh>[\u4e00-\u9fff][^.\s]+)(?:\.|\s+))?"
                 r"(?P<title_en>.+?)\s+"
-                r"(?:(?P<season>S\d{1,2})(?:E(?P<episode>\d{1,3}))?\s+)?"
+                r"(?:(?P<season>S\d{1,2})(?:E(?P<episode>\d{1,3})(?:[-~–—]E?(?P<episode_end>\d{1,3}))?)?\s+)?"
                 r"(?P<year>\d{4})\s+"
                 r"(?P<resolution>\d{3,4}p)\s+"
             )
