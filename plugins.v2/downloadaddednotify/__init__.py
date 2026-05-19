@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.2.8"
+    plugin_version = "0.3.0"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -107,6 +107,18 @@ class DownloadAddedNotify(_PluginBase):
         "状态": "📌",
         "事件": "🔔",
     }
+    _episode_text_keys = (
+        "season_episode",
+        "season_episode_text",
+        "episode_text",
+        "download_episodes",
+        "episodes",
+        "name",
+        "title",
+        "org_string",
+        "original_name",
+        "subtitle",
+    )
 
     def init_plugin(self, config: Optional[dict] = None):
         if not config:
@@ -1486,32 +1498,27 @@ class DownloadAddedNotify(_PluginBase):
         return None
 
     @classmethod
+    def _trusted_episode_values(cls, value: Any) -> List[Any]:
+        if value in (None, ""):
+            return []
+        if isinstance(value, dict):
+            values = []
+            for key in cls._episode_text_keys:
+                item = value.get(key)
+                if item not in (None, ""):
+                    values.append(item)
+            return values
+        if isinstance(value, (list, tuple, set)):
+            return list(value)
+        return [value]
+
+    @classmethod
     def _extract_explicit_episode_text(cls, value: Any) -> Optional[str]:
         if value in (None, ""):
             return None
         if isinstance(value, dict):
-            direct = cls._first_raw_value(
-                value,
-                "season_episode",
-                "season_episode_text",
-                "episode_text",
-                "download_episodes",
-                "episodes",
-                "name",
-                "title",
-                "org_string",
-                "original_name",
-                "subtitle",
-                "path",
-                "content_path",
-                "contentPath",
-                "file_path",
-            )
-            explicit = cls._extract_explicit_episode_text(direct)
-            if explicit:
-                return explicit
-            for key in ("name", "title", "org_string", "original_name", "subtitle"):
-                explicit = cls._extract_explicit_episode_text(value.get(key))
+            for item in cls._trusted_episode_values(value):
+                explicit = cls._extract_explicit_episode_text(item)
                 if explicit:
                     return explicit
             return None
@@ -1645,21 +1652,9 @@ class DownloadAddedNotify(_PluginBase):
             return []
         if isinstance(value, dict):
             pairs = []
-            direct = cls._first_raw_value(
-                value,
-                "season_episode",
-                "season_episode_text",
-                "episode_text",
-                "download_episodes",
-                "episodes",
-            )
-            pairs.extend(cls._collect_episode_pairs(direct, season_hint))
             season = cls._extract_season_number(value) or season_hint
-            episode = cls._extract_episode_number(value)
-            if episode:
-                pairs.append((season, episode))
-            for key in ("name", "title", "path", "content_path", "contentPath", "file_path", "save_path"):
-                pairs.extend(cls._collect_episode_pairs(value.get(key), season))
+            for item in cls._trusted_episode_values(value):
+                pairs.extend(cls._collect_episode_pairs(item, season))
             return pairs
         if isinstance(value, (list, tuple, set)):
             pairs = []
@@ -1705,26 +1700,10 @@ class DownloadAddedNotify(_PluginBase):
                 return None
             return cls._format_episode_pairs(pairs)
         if isinstance(value, dict):
-            direct = cls._first_raw_value(
-                value,
-                "season_episode",
-                "season_episode_text",
-                "episode_text",
-                "download_episodes",
-                "episodes",
-                "episode",
-                "ep",
-                "episode_number",
-                "episode_num",
-                "begin_episode",
-            )
-            extracted = cls._extract_episode_from_value(direct)
-            if extracted:
-                return extracted
-            season = cls._extract_season_number(value)
-            episode = cls._extract_episode_number(value)
-            if season and episode:
-                return cls._format_season_episode(season, episode)
+            for item in cls._trusted_episode_values(value):
+                extracted = cls._extract_episode_from_value(item)
+                if extracted:
+                    return extracted
             return None
 
         text = cls._stringify(value)
@@ -1758,11 +1737,8 @@ class DownloadAddedNotify(_PluginBase):
         if value in (None, ""):
             return None
         if isinstance(value, dict):
-            raw = cls._first_raw_value(value, "season", "season_number", "season_num", "season_no")
-            if raw not in (None, ""):
-                return cls._to_positive_int(raw)
-            for key in ("title", "name", "org_string"):
-                found = cls._extract_season_number(value.get(key))
+            for item in cls._trusted_episode_values(value):
+                found = cls._extract_season_number(item)
                 if found:
                     return found
             return None
@@ -1774,18 +1750,10 @@ class DownloadAddedNotify(_PluginBase):
         if value in (None, ""):
             return None
         if isinstance(value, dict):
-            raw = cls._first_raw_value(
-                value,
-                "episode",
-                "ep",
-                "episode_number",
-                "episode_num",
-                "episode_no",
-                "begin_episode",
-                "current_episode",
-            )
-            if raw not in (None, ""):
-                return cls._to_positive_int(raw)
+            for item in cls._trusted_episode_values(value):
+                raw = cls._extract_episode_number(item)
+                if raw:
+                    return raw
             return None
         match = re.search(r"\b(?:E|EP|Episode)\s*0?(\d{1,3})\b", str(value), re.IGNORECASE)
         if match:
