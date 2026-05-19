@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.2.7"
+    plugin_version = "0.2.8"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1669,7 +1669,13 @@ class DownloadAddedNotify(_PluginBase):
 
         text = cls._stringify(value)
         if "/" in text or "\\" in text:
-            text = os.path.basename(text.replace("\\", "/"))
+            text = text.replace("\\", "/").rstrip("/")
+            base_name = os.path.basename(text)
+            ext = os.path.splitext(base_name)[1].lower()
+            if ext and ext in cls._video_extensions:
+                text = base_name
+            else:
+                return []
         pairs = []
         for match in re.finditer(
             r"\bS(?:eason)?\s*0?(\d{1,2})\s*[-_. ]*\s*(?:E|EP|Episode)\s*0?(\d{1,3})\b",
@@ -1723,7 +1729,13 @@ class DownloadAddedNotify(_PluginBase):
 
         text = cls._stringify(value)
         if "/" in text or "\\" in text:
-            text = os.path.basename(text.replace("\\", "/"))
+            text = text.replace("\\", "/").rstrip("/")
+            base_name = os.path.basename(text)
+            ext = os.path.splitext(base_name)[1].lower()
+            if ext and ext in cls._video_extensions:
+                text = base_name
+            else:
+                return None
         explicit = cls._extract_explicit_episode_text(text)
         if explicit:
             return explicit
@@ -1786,13 +1798,17 @@ class DownloadAddedNotify(_PluginBase):
         path = cls._clean_message_value(value)
         if not path:
             return None
-        episode = cls._extract_episode_from_value(os.path.basename(path))
-        if episode:
-            return episode
+        normalized_path = path.replace("\\", "/").rstrip("/")
+        base_name = os.path.basename(normalized_path)
+        ext = os.path.splitext(base_name)[1].lower()
+        if ext in cls._video_extensions:
+            episode = cls._extract_episode_from_value(base_name)
+            if episode:
+                return episode
         if not os.path.exists(path):
             return None
         if os.path.isfile(path):
-            return cls._extract_episode_from_value(os.path.basename(path))
+            return cls._extract_episode_from_value(base_name)
         if not os.path.isdir(path):
             return None
 
