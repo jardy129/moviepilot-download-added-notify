@@ -2,6 +2,7 @@ import json
 import os
 import re
 import secrets
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, urlparse
@@ -51,7 +52,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.3.4"
+    plugin_version = "0.3.5"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1372,7 +1373,7 @@ class DownloadAddedNotify(_PluginBase):
             formatted = cls._format_release_name_by_template(merged)
             if formatted:
                 return formatted
-        return cls._compact_name(title, episode=episode) or cls._moviepilot_compact_name(mp_info)
+        return cls._moviepilot_compact_name(mp_info) or cls._compact_name(title, episode=episode)
 
     @classmethod
     def _moviepilot_meta_to_dict(cls, meta: Any) -> Dict[str, str]:
@@ -1535,8 +1536,6 @@ class DownloadAddedNotify(_PluginBase):
         release_info = self._parse_release_name(title)
         if not release_info or not release_info.get("season") or release_info.get("episode"):
             return []
-        if self._extract_episode(title, *known_values):
-            return []
         return self._qb_torrent_file_names(torrent_hash)
 
     def _qb_torrent_file_names_for_parse(self, torrent_hash: Optional[str], title: Any, *known_values: Any) -> List[str]:
@@ -1546,6 +1545,9 @@ class DownloadAddedNotify(_PluginBase):
         if not self._needs_qb_file_parse_source(title):
             return []
         file_names = self._qb_torrent_file_names(torrent_hash)
+        if not file_names and torrent_hash:
+            time.sleep(0.8)
+            file_names = self._qb_torrent_file_names(torrent_hash)
         parse_title = self._best_parse_title(title, file_names=file_names, path=next((value for value in known_values if value), None))
         title_text = self._clean_message_value(title)
         if file_names and parse_title and title_text and parse_title != title_text:
