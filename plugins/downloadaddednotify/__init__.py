@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.2.6"
+    plugin_version = "0.2.7"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -1205,7 +1205,11 @@ class DownloadAddedNotify(_PluginBase):
                 else:
                     name = str(item)
                 if name:
-                    names.append(str(name))
+                    path_text = str(name)
+                    base_name = os.path.basename(path_text)
+                    ext = os.path.splitext(base_name)[1].lower()
+                    if ext in self._video_extensions:
+                        names.append(base_name)
             return names
         except Exception as err:
             logger.warn(f"{self.plugin_name}: 获取 qBittorrent 文件列表失败 - {err}")
@@ -1664,6 +1668,8 @@ class DownloadAddedNotify(_PluginBase):
             return pairs
 
         text = cls._stringify(value)
+        if "/" in text or "\\" in text:
+            text = os.path.basename(text.replace("\\", "/"))
         pairs = []
         for match in re.finditer(
             r"\bS(?:eason)?\s*0?(\d{1,2})\s*[-_. ]*\s*(?:E|EP|Episode)\s*0?(\d{1,3})\b",
@@ -1716,6 +1722,8 @@ class DownloadAddedNotify(_PluginBase):
             return None
 
         text = cls._stringify(value)
+        if "/" in text or "\\" in text:
+            text = os.path.basename(text.replace("\\", "/"))
         explicit = cls._extract_explicit_episode_text(text)
         if explicit:
             return explicit
