@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import secrets
@@ -50,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.1.20"
+    plugin_version = "0.2.0"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -78,7 +79,7 @@ class DownloadAddedNotify(_PluginBase):
     _qb_username = ""
     _qb_password = ""
     _qb_tag_name = "MOVIEPILOT"
-    _release_name_template = "{title} | {resolution}{fps_part} | {audio} | {group}"
+    _release_name_template = "{title} | {resolution}{fps_part} | {audio} | {release_tag} | {group}"
     _video_extensions = {
         ".mkv",
         ".mp4",
@@ -131,9 +132,13 @@ class DownloadAddedNotify(_PluginBase):
         self._qb_username = (config.get("qb_username") or "").strip()
         self._qb_password = (config.get("qb_password") or "").strip()
         self._qb_tag_name = (config.get("qb_tag_name") or "MOVIEPILOT").strip()
+        release_name_template = config.get("release_name_template")
+        if release_name_template == "{title} | {resolution}{fps_part} | {audio} | {group}":
+            release_name_template = "{title} | {resolution}{fps_part} | {audio} | {release_tag} | {group}"
+            config["release_name_template"] = release_name_template
         self._release_name_template = (
-            config.get("release_name_template")
-            or "{title} | {resolution}{fps_part} | {audio} | {group}"
+            release_name_template
+            or "{title} | {resolution}{fps_part} | {audio} | {release_tag} | {group}"
         ).strip()
         self.__class__._release_name_template = self._release_name_template
         if not self._external_notify_token:
@@ -211,7 +216,16 @@ class DownloadAddedNotify(_PluginBase):
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "seeders", "seeds", "num_seeds"))
         media_title = self._media_title(media_info, meta_info)
         year = self._first_value(media_data, "year") or self._first_value(meta_data, "year")
-        episode = self._extract_episode(title, torrent_data, meta_data, media_data, data)
+        torrent_hash = self._first_value(torrent_data, "hash", "info_hash") or self._first_value(data, "hash", "info_hash")
+        episode = self._extract_episode_summary(
+            title,
+            torrent_data,
+            meta_data,
+            media_data,
+            data,
+            self._qb_torrent_file_names(torrent_hash),
+            self._extract_episode_from_download_path(save_path),
+        )
 
         media_text = media_title
         if media_text and year:
@@ -283,6 +297,12 @@ class DownloadAddedNotify(_PluginBase):
             self._first_value(self._to_dict(transfer_data.get("target_item")), "path", "name")
             or self._first_value(transfer_data, "target_path", "target_dir", "file_path")
         )
+        episode = self._extract_episode_summary(
+            title,
+            data,
+            self._extract_episode_from_download_path(source_path),
+            self._extract_episode_from_download_path(target_path),
+        )
 
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -290,12 +310,7 @@ class DownloadAddedNotify(_PluginBase):
                 "名称",
                 self._compact_name(
                     title,
-                    episode=self._extract_episode(
-                        title,
-                        torrent_data,
-                        self._extract_episode_from_download_path(content_path),
-                        self._extract_episode_from_download_path(save_path),
-                    ),
+                    episode=episode,
                 ),
             ),
             ("下载器", self._format_downloader_label(downloader)),
@@ -312,13 +327,13 @@ class DownloadAddedNotify(_PluginBase):
 
         try:
             self._post_notification(
-                title=self._display_title(title, event_text="下载完成"),
+                title=self._display_title(title, event_text="下载完成", episode=episode),
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送下载完成通知 - {title}")
         except TypeError:
             self._post_notification(
-                title=self._display_title(title, event_text="下载完成"),
+                title=self._display_title(title, event_text="下载完成", episode=episode),
                 text="\n".join(lines),
             )
             logger.info(f"{self.plugin_name}: 已发送下载完成通知 - {title}")
@@ -386,6 +401,7 @@ class DownloadAddedNotify(_PluginBase):
         title = self._first_value(torrent_data, "name", "title") or "未知任务"
         content_path = self._first_value(torrent_data, "content_path", "contentPath", "file_path", "path")
         save_path = self._first_value(torrent_data, "save_path", "content_path")
+        torrent_hash = self._first_value(torrent_data, "hash", "info_hash")
         category = self._format_category(self._first_value(torrent_data, "category"), title)
         tags = self._first_value(torrent_data, "tags")
         state = self._first_value(torrent_data, "state")
@@ -393,9 +409,10 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(torrent_data, "total_size", "size"))
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
-        episode = self._extract_episode(
+        episode = self._extract_episode_summary(
             title,
             torrent_data,
+            self._qb_torrent_file_names(torrent_hash),
             self._extract_episode_from_download_path(content_path),
             self._extract_episode_from_download_path(save_path),
         )
@@ -437,14 +454,14 @@ class DownloadAddedNotify(_PluginBase):
                 title=display_title,
                 text="\n".join(lines),
             )
-            self._add_qb_tag(self._first_value(torrent_data, "hash", "info_hash"))
+            self._add_qb_tag(torrent_hash)
             logger.info(f"{self.plugin_name}: 已发送 Qbittorrent 新任务通知 - {title}")
         except TypeError:
             self._post_notification(
                 title=display_title,
                 text="\n".join(lines),
             )
-            self._add_qb_tag(self._first_value(torrent_data, "hash", "info_hash"))
+            self._add_qb_tag(torrent_hash)
             logger.info(f"{self.plugin_name}: 已发送 Qbittorrent 新任务通知 - {title}")
         except Exception as err:
             logger.error(f"{self.plugin_name}: 发送 Qbittorrent 新任务通知失败 - {err}", exc_info=True)
@@ -471,17 +488,20 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(payload, "size", "total_size"))
         quality = self._first_value(payload, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
+        torrent_hash = self._first_value(payload, "hash", "info_hash")
+        episode = self._extract_episode_summary(
+            title,
+            payload,
+            self._qb_torrent_file_names(torrent_hash),
+            self._extract_episode_from_download_path(content_path),
+            self._extract_episode_from_download_path(save_path),
+        )
 
         event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
         display_title = self._display_title(
             title,
             event_text="下载完成" if event in ("completed", "finished", "done") else "开始下载",
-            episode=self._extract_episode(
-                title,
-                payload,
-                self._extract_episode_from_download_path(content_path),
-                self._extract_episode_from_download_path(save_path),
-            ),
+            episode=episode,
         )
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -493,7 +513,7 @@ class DownloadAddedNotify(_PluginBase):
             ("做种", seeders),
             ("类别", category),
             ("标签", tags),
-            ("名称", self._compact_name(title)),
+            ("名称", self._compact_name(title, episode=episode)),
             ("下载器", self._format_downloader_label(downloader)),
             ("目录", save_path),
         )
@@ -510,7 +530,7 @@ class DownloadAddedNotify(_PluginBase):
             text="\n".join(lines),
         )
         if event not in ("completed", "finished", "done"):
-            self._add_qb_tag(self._first_value(payload, "hash", "info_hash"))
+            self._add_qb_tag(torrent_hash)
         logger.info(f"{self.plugin_name}: 已接收 Qbittorrent 外部程序通知 - {event}: {title}")
         return {"success": True, "message": "ok"}
 
@@ -666,7 +686,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VSelect",
@@ -683,7 +703,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -697,7 +717,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -711,7 +731,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -725,14 +745,14 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
                                         "props": {
                                             "model": "release_name_template",
                                             "label": "名称标签模板",
-                                            "placeholder": "{title} | {resolution}{fps_part} | {audio} | {group}",
+                                            "placeholder": "{title} | {resolution}{fps_part} | {audio} | {release_tag} | {group}",
                                         },
                                     }
                                 ],
@@ -753,7 +773,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VSwitch",
@@ -808,7 +828,7 @@ class DownloadAddedNotify(_PluginBase):
                             },
                             {
                                 "component": "VCol",
-                                "props": {"cols": 12, "md": 6},
+                                "props": {"cols": 12, "md": 4},
                                 "content": [
                                     {
                                         "component": "VTextField",
@@ -879,7 +899,7 @@ class DownloadAddedNotify(_PluginBase):
             "qb_username": "",
             "qb_password": "",
             "qb_tag_name": "MOVIEPILOT",
-            "release_name_template": "{title} | {resolution}{fps_part} | {audio} | {group}",
+            "release_name_template": "{title} | {resolution}{fps_part} | {audio} | {release_tag} | {group}",
             "qb_added_command": "",
             "qb_completed_command": "",
         }
@@ -921,25 +941,25 @@ class DownloadAddedNotify(_PluginBase):
                                 4,
                             ),
                             self._page_text("qb_web_url", "qBittorrent Web 地址", self._qb_web_url, 4),
-                            self._page_text("qb_username", "qBittorrent 用户名", self._qb_username, 3),
-                            self._page_text("qb_password", "qBittorrent 密码", self._qb_password, 3, "password"),
-                            self._page_text("qb_tag_name", "自动标签名称", self._qb_tag_name, 2),
+                            self._page_text("qb_username", "qBittorrent 用户名", self._qb_username, 4),
+                            self._page_text("qb_password", "qBittorrent 密码", self._qb_password, 4, "password"),
+                            self._page_text("qb_tag_name", "自动标签名称", self._qb_tag_name, 4),
                             self._page_text("moviepilot_base_url", "MoviePilot 地址", self._moviepilot_base_url, 4),
-                            self._page_text("qb_downloader_name", "下载器名称", self._qb_downloader_name, 2),
-                            self._page_text("downloader_label_name", "下载器标签名称", self._downloader_label_name, 3),
-                            self._page_text("qb_poll_interval", "轮询间隔（秒）", self._qb_poll_interval, 3),
-                            self._page_text("notify_stage", "通知时机", self._format_notify_stage(), 3),
-                            self._page_text("notify_type", "通知类型", self._notify_type, 3),
-                            self._page_text("only_downloader", "只通知下载器", self._only_downloader or "全部", 3),
-                            self._page_text("release_name_template", "名称标签模板", self._release_name_template, 6),
-                            self._page_text("header_image_url", "推送头图 URL", self._header_image_url or "未设置", 3),
+                            self._page_text("qb_downloader_name", "下载器名称", self._qb_downloader_name, 4),
+                            self._page_text("downloader_label_name", "下载器标签名称", self._downloader_label_name, 4),
+                            self._page_text("qb_poll_interval", "轮询间隔（秒）", self._qb_poll_interval, 4),
+                            self._page_text("notify_stage", "通知时机", self._format_notify_stage(), 4),
+                            self._page_text("notify_type", "通知类型", self._notify_type, 4),
+                            self._page_text("only_downloader", "只通知下载器", self._only_downloader or "全部", 4),
+                            self._page_text("release_name_template", "名称标签模板", self._release_name_template, 4),
+                            self._page_text("header_image_url", "推送头图 URL", self._header_image_url or "未设置", 4),
                             self._page_switch(
                                 "external_notify_enabled",
                                 "外部程序通知接口",
                                 self._external_notify_enabled,
-                                3,
+                                4,
                             ),
-                            self._page_text("external_notify_token", "外部通知 Token", self._external_notify_token, 3),
+                            self._page_text("external_notify_token", "外部通知 Token", self._external_notify_token, 4),
                             self._page_textarea(
                                 "qb_added_command",
                                 "qBittorrent 添加种子时运行外部程序",
@@ -1140,6 +1160,46 @@ class DownloadAddedNotify(_PluginBase):
             logger.info(f"{self.plugin_name}: 已尝试为 {torrent_hash} 添加 qBittorrent 标签 {tag_name}")
         except Exception as err:
             logger.error(f"{self.plugin_name}: 自动添加 qBittorrent 标签失败 - {err}", exc_info=True)
+
+    def _qb_torrent_file_names(self, torrent_hash: Optional[str]) -> List[str]:
+        if not torrent_hash or not self._qb_web_url or not self._qb_username or not self._qb_password:
+            return []
+
+        base_url = self._qb_web_url.rstrip("/")
+        try:
+            login_data = urlencode({
+                "username": self._qb_username,
+                "password": self._qb_password,
+            }).encode()
+            login_request = UrlRequest(
+                f"{base_url}/api/v2/auth/login",
+                data=login_data,
+                method="POST",
+            )
+            with urlopen(login_request, timeout=10) as response:
+                cookie = response.headers.get("Set-Cookie", "").split(";", 1)[0]
+                login_body = response.read().decode(errors="ignore").strip()
+            if not cookie or login_body.lower().startswith("fails"):
+                return []
+
+            files_url = f"{base_url}/api/v2/torrents/files?{urlencode({'hash': torrent_hash})}"
+            files_request = UrlRequest(files_url, headers={"Cookie": cookie}, method="GET")
+            with urlopen(files_request, timeout=10) as response:
+                files = json.loads(response.read().decode(errors="ignore") or "[]")
+            if not isinstance(files, list):
+                return []
+            names = []
+            for item in files:
+                if isinstance(item, dict):
+                    name = item.get("name")
+                else:
+                    name = str(item)
+                if name:
+                    names.append(str(name))
+            return names
+        except Exception as err:
+            logger.warn(f"{self.plugin_name}: 获取 qBittorrent 文件列表失败 - {err}")
+            return []
 
     @staticmethod
     def _raise_http_error(status_code: int, detail: str):
@@ -1408,9 +1468,101 @@ class DownloadAddedNotify(_PluginBase):
         return None
 
     @classmethod
+    def _extract_episode_summary(cls, *values: Any) -> Optional[str]:
+        season_hint = None
+        episode_pairs = []
+        for value in values:
+            season_hint = season_hint or cls._extract_season_number(value)
+        for value in values:
+            episode_pairs.extend(cls._collect_episode_pairs(value, season_hint))
+        if not episode_pairs:
+            return cls._extract_episode(*values)
+        return cls._format_episode_pairs(episode_pairs, season_hint)
+
+    @classmethod
+    def _format_episode_pairs(cls, episode_pairs: List[tuple], season_hint: Optional[int] = None) -> Optional[str]:
+        if not episode_pairs:
+            return None
+
+        unique = []
+        seen = set()
+        for season, episode in episode_pairs:
+            key = (season or 0, episode)
+            if key not in seen:
+                seen.add(key)
+                unique.append(key)
+        unique.sort()
+        seasons = {season for season, _ in unique if season}
+        episodes = [episode for _, episode in unique]
+        season = next(iter(seasons)) if len(seasons) == 1 else (season_hint if season_hint else None)
+        if len(unique) == 1:
+            only_season, only_episode = unique[0]
+            return cls._format_season_episode(only_season, only_episode) if only_season else f"E{only_episode:02d}"
+        if season:
+            if episodes == list(range(min(episodes), max(episodes) + 1)):
+                return f"S{season:02d}E{min(episodes):02d}-E{max(episodes):02d}"
+            return f"S{season:02d}" + ",".join(f"E{episode:02d}" for episode in episodes)
+        if episodes == list(range(min(episodes), max(episodes) + 1)):
+            return f"E{min(episodes):02d}-E{max(episodes):02d}"
+        return ",".join(f"E{episode:02d}" for episode in episodes)
+
+    @classmethod
+    def _collect_episode_pairs(cls, value: Any, season_hint: Optional[int] = None) -> List[tuple]:
+        if value in (None, ""):
+            return []
+        if isinstance(value, dict):
+            pairs = []
+            direct = cls._first_raw_value(
+                value,
+                "season_episode",
+                "season_episode_text",
+                "episode_text",
+                "download_episodes",
+                "episodes",
+            )
+            pairs.extend(cls._collect_episode_pairs(direct, season_hint))
+            season = cls._extract_season_number(value) or season_hint
+            episode = cls._extract_episode_number(value)
+            if episode:
+                pairs.append((season, episode))
+            for key in ("name", "title", "path", "content_path", "contentPath", "file_path", "save_path"):
+                pairs.extend(cls._collect_episode_pairs(value.get(key), season))
+            return pairs
+        if isinstance(value, (list, tuple, set)):
+            pairs = []
+            for item in value:
+                pairs.extend(cls._collect_episode_pairs(item, season_hint))
+            return pairs
+
+        text = cls._stringify(value)
+        pairs = []
+        for match in re.finditer(
+            r"\bS(?:eason)?\s*0?(\d{1,2})\s*[-_. ]*\s*(?:E|EP|Episode)\s*0?(\d{1,3})\b",
+            text,
+            re.IGNORECASE,
+        ):
+            pairs.append((int(match.group(1)), int(match.group(2))))
+        for match in re.finditer(r"\b0?(\d{1,2})\s*x\s*0?(\d{1,3})\b", text, re.IGNORECASE):
+            pairs.append((int(match.group(1)), int(match.group(2))))
+        if pairs:
+            return pairs
+
+        local_season = cls._extract_season_number(text) or season_hint
+        for match in re.finditer(r"\b(?:E|EP|Episode)\s*0?(\d{1,3})\b", text, re.IGNORECASE):
+            pairs.append((local_season, int(match.group(1))))
+        for match in re.finditer(r"第\s*(\d+)\s*[集话]", text):
+            pairs.append((local_season, int(match.group(1))))
+        return pairs
+
+    @classmethod
     def _extract_episode_from_value(cls, value: Any) -> Optional[str]:
         if value in (None, ""):
             return None
+        if isinstance(value, (list, tuple, set)):
+            pairs = cls._collect_episode_pairs(value)
+            if not pairs:
+                return None
+            return cls._format_episode_pairs(pairs)
         if isinstance(value, dict):
             direct = cls._first_raw_value(
                 value,
@@ -1548,7 +1700,13 @@ class DownloadAddedNotify(_PluginBase):
         text = str(value)
         if re.match(r"^S\d{2}E\d{2,3}$", text, re.IGNORECASE):
             return text.upper()
+        if re.match(r"^S\d{2}E\d{2,3}-E\d{2,3}$", text, re.IGNORECASE):
+            return text.upper()
+        if re.match(r"^S\d{2}(?:E\d{2,3},)+E\d{2,3}$", text, re.IGNORECASE):
+            return text.upper()
         if re.match(r"^E\d{2,3}$", text, re.IGNORECASE):
+            return text.upper()
+        if re.match(r"^E\d{2,3}-E\d{2,3}$", text, re.IGNORECASE):
             return text.upper()
         if re.match(r"^第\d+集$", text):
             return text
@@ -1593,7 +1751,7 @@ class DownloadAddedNotify(_PluginBase):
     @classmethod
     def _format_release_name_by_template(cls, info: Dict[str, str]) -> Optional[str]:
         variables = cls._release_name_variables(info)
-        template = cls._release_name_template or "{title} | {resolution}{fps_part} | {audio} | {group}"
+        template = cls._release_name_template or "{title} | {resolution}{fps_part} | {audio} | {release_tag} | {group}"
 
         def replace_var(match: re.Match) -> str:
             return variables.get(match.group(1), "") or ""
@@ -1651,7 +1809,12 @@ class DownloadAddedNotify(_PluginBase):
             return release_tag
         audio = info.get("audio")
         group = info.get("group")
-        if audio and group and "@" in str(group):
+        if (
+            audio
+            and group
+            and "@" in str(group)
+            and re.match(r"^(H\.?26[45]|HEVC|AVC|x26[45])$", str(audio), re.IGNORECASE)
+        ):
             return f"{audio}-{str(group).split('@', 1)[0]}"
         return None
 
@@ -1735,6 +1898,24 @@ class DownloadAddedNotify(_PluginBase):
 
     @classmethod
     def _normalize_release_info(cls, info: Dict[str, str]):
+        codec = info.get("codec")
+        quality = info.get("quality")
+        audio = info.get("audio")
+        group = info.get("group")
+        if (
+            codec
+            and quality
+            and audio
+            and group
+            and cls._looks_like_audio(f"{codec}.{quality}")
+            and re.match(r"^(H\.?26[45]|HEVC|AVC|x26[45])$", audio, re.IGNORECASE)
+        ):
+            info["audio"] = f"{codec}.{quality}"
+            info["codec"] = audio
+            info.pop("quality", None)
+            if "@" in group:
+                info["release_tag"] = f"{audio}-{group.split('@', 1)[0]}"
+
         quality = info.get("quality")
         if quality and "@" in quality:
             release_match = re.match(

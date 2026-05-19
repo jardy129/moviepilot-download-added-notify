@@ -2,13 +2,14 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.1.20",
+    "version": "0.2.0",
     "icon": "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png",
     "author": "jardy",
     "author_url": "https://github.com/jardy129/",
     "level": 0,
     "v2": true,
     "history": {
+      "v0.2.0": "优化多文件种子集数识别、发布组音视频信息解析和配置页面布局",
       "v0.1.20": "修正中文点号加英文空格电影标题解析，避免电影误补剧集集数",
       "v0.1.19": "修正 AAC.H265-Pure@发布组格式的名称标签解析",
       "v0.1.18": "精简插件详情页布局，配置保存统一使用原生配置弹窗",
