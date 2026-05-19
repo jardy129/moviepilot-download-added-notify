@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.3.3"
+    plugin_version = "0.3.4"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -431,25 +431,26 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(torrent_data, "total_size", "size"))
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
-        file_names = self._qb_torrent_file_names_if_needed(torrent_hash, title, content_path, save_path)
-        mp_info = self._moviepilot_parse(title, file_names=file_names, path=content_path or save_path)
+        file_names = self._qb_torrent_file_names_for_parse(torrent_hash, title, content_path, save_path)
+        parse_title = self._best_parse_title(title, file_names=file_names, path=content_path or save_path)
+        mp_info = self._moviepilot_parse(parse_title, file_names=file_names, path=content_path or save_path, original_title=title)
         episode = self._resolve_episode(
-            title,
+            parse_title,
             file_names,
             self._extract_episode_from_download_path(content_path),
             torrent_data,
         )
-        episode = self._select_episode(title, episode, mp_info.get("episode"))
+        episode = self._select_episode(parse_title, episode, mp_info.get("episode"))
         quality = quality or mp_info.get("quality")
         category = category or mp_info.get("category")
         display_title = self._display_title(
-            title,
-            media_title=self._best_media_title(title, mp_info.get("title")),
+            parse_title,
+            media_title=self._best_media_title(title, parse_title, mp_info.get("title")),
             year=mp_info.get("year"),
             event_text="开始下载",
             episode=episode,
         )
-        compact_name = self._compact_name_with_moviepilot(title, mp_info, episode=episode)
+        compact_name = self._compact_name_with_moviepilot(parse_title, mp_info, episode=episode)
 
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -512,27 +513,28 @@ class DownloadAddedNotify(_PluginBase):
         quality = self._first_value(payload, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
         torrent_hash = self._first_value(payload, "hash", "info_hash")
-        file_names = self._qb_torrent_file_names_if_needed(torrent_hash, title, content_path, save_path)
-        mp_info = self._moviepilot_parse(title, file_names=file_names, path=content_path or save_path)
+        file_names = self._qb_torrent_file_names_for_parse(torrent_hash, title, content_path, save_path)
+        parse_title = self._best_parse_title(title, file_names=file_names, path=content_path or save_path)
+        mp_info = self._moviepilot_parse(parse_title, file_names=file_names, path=content_path or save_path, original_title=title)
         episode = self._resolve_episode(
-            title,
+            parse_title,
             file_names,
             self._extract_episode_from_download_path(content_path),
             payload,
         )
-        episode = self._select_episode(title, episode, mp_info.get("episode"))
+        episode = self._select_episode(parse_title, episode, mp_info.get("episode"))
         quality = quality or mp_info.get("quality")
         category = category or mp_info.get("category")
 
         event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
         display_title = self._display_title(
-            title,
-            media_title=self._best_media_title(title, mp_info.get("title")),
+            parse_title,
+            media_title=self._best_media_title(title, parse_title, mp_info.get("title")),
             year=mp_info.get("year"),
             event_text="下载完成" if event in ("completed", "finished", "done") else "开始下载",
             episode=episode,
         )
-        compact_name = self._compact_name_with_moviepilot(title, mp_info, episode=episode)
+        compact_name = self._compact_name_with_moviepilot(parse_title, mp_info, episode=episode)
         lines = self._message_lines(
             ("时间", self._now_text()),
             ("事件", event_name),
@@ -1145,7 +1147,85 @@ class DownloadAddedNotify(_PluginBase):
                 self.post_message(**kwargs)
 
     @classmethod
-    def _moviepilot_parse(cls, title: Any, file_names: Any = None, path: Any = None) -> Dict[str, str]:
+    def _best_parse_title(cls, title: Any, file_names: Any = None, path: Any = None) -> str:
+        candidates = []
+        for file_name in cls._trusted_episode_values(file_names):
+            candidates.append(cls._path_parse_title(file_name) or file_name)
+        path_title = cls._path_parse_title(path)
+        if path_title:
+            candidates.append(path_title)
+        candidates.append(title)
+
+        best = None
+        best_score = -1
+        for candidate in candidates:
+            text = cls._clean_message_value(candidate)
+            if not text:
+                continue
+            score = cls._parse_title_score(text)
+            if score > best_score:
+                best = text
+                best_score = score
+        return best or cls._clean_message_value(title) or "未知任务"
+
+    @classmethod
+    def _path_parse_title(cls, path: Any) -> Optional[str]:
+        text = cls._clean_message_value(path)
+        if not text:
+            return None
+        normalized = text.replace("\\", "/").rstrip("/")
+        base_name = os.path.basename(normalized)
+        if not base_name:
+            return None
+        root, ext = os.path.splitext(base_name)
+        if ext.lower() in cls._video_extensions:
+            if root and not re.match(r"^\d{4,6}$", root):
+                return root
+        path_parts = [item for item in normalized.split("/") if item]
+        scored_parts = sorted(
+            ((part, cls._parse_title_score(part)) for part in path_parts),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        if scored_parts and scored_parts[0][1] >= 20:
+            return scored_parts[0][0]
+        if cls._parse_title_score(base_name) >= 20:
+            return base_name
+        return None
+
+    @classmethod
+    def _parse_title_score(cls, value: Any) -> int:
+        text = cls._clean_message_value(value) or ""
+        if not text:
+            return 0
+        info = cls._parse_release_name(text) or {}
+        score = min(len(text), 120) // 10
+        if info.get("title_zh"):
+            score += 16
+        if info.get("title_en"):
+            score += 8
+        if info.get("year"):
+            score += 8
+        if info.get("season"):
+            score += 8
+        if info.get("episode"):
+            score += 10
+        if info.get("resolution"):
+            score += 10
+        if info.get("audio"):
+            score += 8
+        if info.get("group"):
+            score += 6
+        if info.get("release_tag"):
+            score += 6
+        if re.search(r"\b(2160p|1080p|720p|480p|WEB-?DL|Blu-?ray|UHD|REMUX|HEVC|AVC|H\.?26[45]|x26[45]|TrueHD|DTS|AAC|DDP?)\b", text, re.IGNORECASE):
+            score += 8
+        if "_" in text and "." not in text:
+            score -= 4
+        return score
+
+    @classmethod
+    def _moviepilot_parse(cls, title: Any, file_names: Any = None, path: Any = None, original_title: Any = None) -> Dict[str, str]:
         try:
             from app.core.metainfo import MetaInfo, MetaInfoPath
         except Exception:
@@ -1191,9 +1271,16 @@ class DownloadAddedNotify(_PluginBase):
                     result.update({key: value for key, value in recognized.items() if value})
 
         local_release = cls._parse_release_name(title_text)
+        original_release = cls._parse_release_name(original_title)
         local_title = cls._strip_title_brackets(local_release.get("title_zh") or "") if local_release else ""
+        original_title_zh = cls._strip_title_brackets(original_release.get("title_zh") or "") if original_release else ""
+        original_simple_title = cls._simple_cjk_title(original_title)
         if local_title and cls._has_cjk(local_title):
             result["title"] = local_title
+        elif original_title_zh and cls._has_cjk(original_title_zh):
+            result["title"] = original_title_zh
+        elif original_simple_title:
+            result["title"] = original_simple_title
 
         title_episode = cls._extract_explicit_episode_text(title_text)
         episode = title_episode or cls._moviepilot_episode_from_metas(file_metas) or cls._moviepilot_episode_from_meta(meta)
@@ -1224,18 +1311,41 @@ class DownloadAddedNotify(_PluginBase):
 
     @classmethod
     def _best_media_title(cls, title: Any, *candidates: Any) -> Optional[str]:
-        release_info = cls._parse_release_name(title) or {}
-        values = [
-            cls._strip_title_brackets(release_info.get("title_zh") or ""),
-            *candidates,
-            release_info.get("title_en"),
-        ]
-        cleaned = [cls._clean_message_value(value) for value in values]
+        parsed_titles = []
+        raw_titles = []
+        for value in (title, *candidates):
+            text = cls._clean_message_value(value)
+            if not text:
+                continue
+            release_info = cls._parse_release_name(text) or {}
+            parsed_titles.append(cls._strip_title_brackets(release_info.get("title_zh") or ""))
+            parsed_titles.append(release_info.get("title_en") or "")
+            parsed_titles.append(cls._simple_cjk_title(text) or "")
+            raw_titles.append(text)
+        cleaned = [cls._clean_message_value(value) for value in (*parsed_titles, *raw_titles)]
         cleaned = [value for value in cleaned if value]
         for value in cleaned:
             if cls._has_cjk(value):
                 return value
         return cleaned[0] if cleaned else None
+
+    @classmethod
+    def _simple_cjk_title(cls, value: Any) -> Optional[str]:
+        text = cls._clean_message_value(value)
+        if not text or not cls._has_cjk(text):
+            return None
+        text = re.sub(r"\b(?:19|20)\d{2}\b", " ", text)
+        text = re.sub(r"\bV\d+\b", " ", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b\d+D\b", " ", text, flags=re.IGNORECASE)
+        text = re.sub(
+            r"\b(2160p|1080p|720p|480p|WEB-?DL|Blu-?ray|UHD|REMUX|HEVC|AVC|H\.?26[45]|x26[45]|TrueHD|DTS|AAC|DDP?|HDR|SDR)\b",
+            " ",
+            text,
+            flags=re.IGNORECASE,
+        )
+        matches = re.findall(r"[\u4e00-\u9fff][\u4e00-\u9fffA-Za-z0-9]*", text)
+        matches = [match.strip("._- ") for match in matches if match.strip("._- ")]
+        return max(matches, key=len) if matches else None
 
     @classmethod
     def _compact_name_with_moviepilot(cls, title: Any, mp_info: Dict[str, str], episode: Any = None) -> Optional[str]:
@@ -1429,6 +1539,32 @@ class DownloadAddedNotify(_PluginBase):
             return []
         return self._qb_torrent_file_names(torrent_hash)
 
+    def _qb_torrent_file_names_for_parse(self, torrent_hash: Optional[str], title: Any, *known_values: Any) -> List[str]:
+        file_names = self._qb_torrent_file_names_if_needed(torrent_hash, title, *known_values)
+        if file_names:
+            return file_names
+        if not self._needs_qb_file_parse_source(title):
+            return []
+        file_names = self._qb_torrent_file_names(torrent_hash)
+        parse_title = self._best_parse_title(title, file_names=file_names, path=next((value for value in known_values if value), None))
+        title_text = self._clean_message_value(title)
+        if file_names and parse_title and title_text and parse_title != title_text:
+            logger.info(f"{self.plugin_name}: qBittorrent 任务名不完整，改用文件名解析：{title_text} -> {parse_title}")
+        return file_names
+
+    @classmethod
+    def _needs_qb_file_parse_source(cls, title: Any) -> bool:
+        text = cls._clean_message_value(title)
+        if not text:
+            return True
+        info = cls._parse_release_name(text)
+        if not info:
+            return True
+        if info.get("season") and not info.get("episode"):
+            return True
+        required = ("year", "resolution", "audio", "group")
+        return any(not info.get(key) for key in required)
+
     def _qb_torrent_file_names(self, torrent_hash: Optional[str]) -> List[str]:
         if not torrent_hash or not self._qb_web_url or not self._qb_username or not self._qb_password:
             return []
@@ -1457,6 +1593,7 @@ class DownloadAddedNotify(_PluginBase):
             if not isinstance(files, list):
                 return []
             names = []
+            folder_names = []
             for item in files:
                 if isinstance(item, dict):
                     name = item.get("name")
@@ -1464,11 +1601,23 @@ class DownloadAddedNotify(_PluginBase):
                     name = str(item)
                 if name:
                     path_text = str(name)
-                    base_name = os.path.basename(path_text)
+                    normalized_path = path_text.replace("\\", "/").strip("/")
+                    path_parts = [part for part in normalized_path.split("/") if part]
+                    for folder_name in path_parts[:-1]:
+                        if self._parse_title_score(folder_name) >= 20:
+                            folder_names.append(folder_name)
+                    base_name = os.path.basename(normalized_path)
                     ext = os.path.splitext(base_name)[1].lower()
                     if ext in self._video_extensions:
-                        names.append(base_name)
-            return names
+                        root_name = os.path.splitext(base_name)[0]
+                        if not re.match(r"^\d{4,6}$", root_name):
+                            names.append(base_name)
+            candidates = names + sorted(
+                dict.fromkeys(folder_names),
+                key=self._parse_title_score,
+                reverse=True,
+            )
+            return list(dict.fromkeys(candidates))
         except Exception as err:
             logger.warn(f"{self.plugin_name}: 获取 qBittorrent 文件列表失败 - {err}")
             return []

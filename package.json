@@ -2,13 +2,14 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.3.3",
+    "version": "0.3.4",
     "icon": "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png",
     "author": "jardy",
     "author_url": "https://github.com/jardy129/",
     "level": 0,
     "v2": true,
         "history": {
+      "v0.3.4": "qBittorrent 任务名不完整时改用视频文件名作为主解析源，修正电影短名误识别",
       "v0.3.3": "优先复用 MoviePilot MetaInfo 和 MediaChain 解析结果，失败时再使用本地解析兜底",
       "v0.3.2": "优化电影种子命名解析，支持年份后版本标记并清洗中英混排标题",
       "v0.3.1": "按来源优先级重构通知集数决策链：标题优先、qB 文件名第二、其他字段最后",
