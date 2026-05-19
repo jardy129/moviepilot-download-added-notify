@@ -52,7 +52,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.3.6"
+    plugin_version = "0.3.7"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -438,7 +438,7 @@ class DownloadAddedNotify(_PluginBase):
         episode = self._resolve_episode(
             parse_title,
             file_names,
-            self._extract_episode_from_download_path(content_path),
+            self._trusted_download_path_episode(parse_title, file_names, content_path),
             torrent_data,
         )
         episode = self._select_episode(parse_title, episode, mp_info.get("episode"))
@@ -520,7 +520,7 @@ class DownloadAddedNotify(_PluginBase):
         episode = self._resolve_episode(
             parse_title,
             file_names,
-            self._extract_episode_from_download_path(content_path),
+            self._trusted_download_path_episode(parse_title, file_names, content_path),
             payload,
         )
         episode = self._select_episode(parse_title, episode, mp_info.get("episode"))
@@ -1627,6 +1627,24 @@ class DownloadAddedNotify(_PluginBase):
             return True
         required = ("year", "resolution", "audio", "group")
         return any(not info.get(key) for key in required)
+
+    @classmethod
+    def _trusted_download_path_episode(cls, title: Any, file_names: Any, path: Any) -> Optional[str]:
+        if cls._season_only_release(title) and not cls._trusted_episode_values(file_names):
+            logger.info(f"{cls.plugin_name}: 季包未取得 qB 文件列表，跳过 content_path 单集集数兜底")
+            return None
+        return cls._extract_episode_from_download_path(path)
+
+    @classmethod
+    def _season_only_release(cls, title: Any) -> bool:
+        release_info = cls._parse_release_name(title) or {}
+        if release_info.get("season") and not release_info.get("episode"):
+            return True
+        text = cls._clean_message_value(title) or ""
+        return bool(
+            re.search(r"\bS(?:eason)?\s*0?\d{1,2}\b", text, re.IGNORECASE)
+            and not re.search(r"\bS(?:eason)?\s*0?\d{1,2}\s*[-_. ]*\s*(?:E|EP|Episode)\s*0?\d{1,3}\b", text, re.IGNORECASE)
+        )
 
     def _qb_torrent_file_names(self, torrent_hash: Optional[str]) -> List[str]:
         if not torrent_hash or not self._qb_web_url or not self._qb_username or not self._qb_password:

@@ -2,13 +2,14 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.3.6",
+    "version": "0.3.7",
     "icon": "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png",
     "author": "jardy",
     "author_url": "https://github.com/jardy129/",
     "level": 0,
     "v2": true,
         "history": {
+      "v0.3.7": "季包拿不到 qB 文件列表时不再使用 content_path 单集兜底，避免误报 S01E07",
       "v0.3.6": "增加短片名识别别名和 qB 任务名反查文件列表兜底，补全年份与季包集数区间",
       "v0.3.5": "修正季包被 content_path 单集抢占导致集数区间丢失，并优化短电影名的名称兜底",
       "v0.3.4": "qBittorrent 任务名不完整时改用视频文件名作为主解析源，修正电影短名误识别",
