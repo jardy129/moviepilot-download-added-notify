@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.3.2"
+    plugin_version = "0.3.3"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -232,6 +232,7 @@ class DownloadAddedNotify(_PluginBase):
         year = self._first_value(media_data, "year") or self._first_value(meta_data, "year")
         torrent_hash = self._first_value(torrent_data, "hash", "info_hash") or self._first_value(data, "hash", "info_hash")
         file_names = self._qb_torrent_file_names_if_needed(torrent_hash, title, save_path)
+        mp_info = self._moviepilot_parse(title, file_names=file_names, path=save_path)
         episode = self._resolve_episode(
             title,
             file_names,
@@ -241,12 +242,17 @@ class DownloadAddedNotify(_PluginBase):
             media_data,
             data,
         )
+        episode = self._select_episode(title, episode, mp_info.get("episode"))
 
+        media_title = self._best_media_title(title, media_title, mp_info.get("title")) or media_title
+        year = year or mp_info.get("year")
+        quality = quality or mp_info.get("quality")
+        category = category or mp_info.get("category")
         media_text = media_title
         if media_text and year:
             media_text = f"{media_text} ({year})"
         display_title = self._display_title(title, media_text, year, "开始下载", episode)
-        compact_name = self._compact_name(title, episode=episode)
+        compact_name = self._compact_name_with_moviepilot(title, mp_info, episode=episode)
         lines = self._message_lines(
             ("时间", self._now_text()),
             ("媒体", media_text),
@@ -426,18 +432,24 @@ class DownloadAddedNotify(_PluginBase):
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
         file_names = self._qb_torrent_file_names_if_needed(torrent_hash, title, content_path, save_path)
+        mp_info = self._moviepilot_parse(title, file_names=file_names, path=content_path or save_path)
         episode = self._resolve_episode(
             title,
             file_names,
             self._extract_episode_from_download_path(content_path),
-            self._extract_episode_from_download_path(save_path),
             torrent_data,
         )
+        episode = self._select_episode(title, episode, mp_info.get("episode"))
+        quality = quality or mp_info.get("quality")
+        category = category or mp_info.get("category")
         display_title = self._display_title(
             title,
+            media_title=self._best_media_title(title, mp_info.get("title")),
+            year=mp_info.get("year"),
             event_text="开始下载",
             episode=episode,
         )
+        compact_name = self._compact_name_with_moviepilot(title, mp_info, episode=episode)
 
         lines = self._message_lines(
             ("时间", self._now_text()),
@@ -448,13 +460,7 @@ class DownloadAddedNotify(_PluginBase):
             ("做种", seeders),
             ("类别", category),
             ("标签", tags),
-            (
-                "名称",
-                self._compact_name(
-                    title,
-                    episode=episode,
-                ),
-            ),
+            ("名称", compact_name),
             ("下载器", self._format_downloader_label(downloader)),
             ("目录", save_path),
         )
@@ -507,20 +513,26 @@ class DownloadAddedNotify(_PluginBase):
         seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
         torrent_hash = self._first_value(payload, "hash", "info_hash")
         file_names = self._qb_torrent_file_names_if_needed(torrent_hash, title, content_path, save_path)
+        mp_info = self._moviepilot_parse(title, file_names=file_names, path=content_path or save_path)
         episode = self._resolve_episode(
             title,
             file_names,
             self._extract_episode_from_download_path(content_path),
-            self._extract_episode_from_download_path(save_path),
             payload,
         )
+        episode = self._select_episode(title, episode, mp_info.get("episode"))
+        quality = quality or mp_info.get("quality")
+        category = category or mp_info.get("category")
 
         event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
         display_title = self._display_title(
             title,
+            media_title=self._best_media_title(title, mp_info.get("title")),
+            year=mp_info.get("year"),
             event_text="下载完成" if event in ("completed", "finished", "done") else "开始下载",
             episode=episode,
         )
+        compact_name = self._compact_name_with_moviepilot(title, mp_info, episode=episode)
         lines = self._message_lines(
             ("时间", self._now_text()),
             ("事件", event_name),
@@ -531,7 +543,7 @@ class DownloadAddedNotify(_PluginBase):
             ("做种", seeders),
             ("类别", category),
             ("标签", tags),
-            ("名称", self._compact_name(title, episode=episode)),
+            ("名称", compact_name),
             ("下载器", self._format_downloader_label(downloader)),
             ("目录", save_path),
         )
@@ -1131,6 +1143,236 @@ class DownloadAddedNotify(_PluginBase):
             except TypeError:
                 kwargs.pop("mtype", None)
                 self.post_message(**kwargs)
+
+    @classmethod
+    def _moviepilot_parse(cls, title: Any, file_names: Any = None, path: Any = None) -> Dict[str, str]:
+        try:
+            from app.core.metainfo import MetaInfo, MetaInfoPath
+        except Exception:
+            return {}
+
+        result: Dict[str, str] = {}
+        meta = None
+        title_text = cls._clean_message_value(title)
+        try:
+            if title_text:
+                meta = MetaInfo(title_text)
+        except Exception as err:
+            logger.warn(f"{cls.plugin_name}: MoviePilot MetaInfo 解析标题失败 - {err}")
+
+        file_metas = []
+        for file_name in cls._trusted_episode_values(file_names):
+            file_text = cls._clean_message_value(file_name)
+            if not file_text:
+                continue
+            try:
+                file_metas.append(MetaInfo(file_text))
+            except Exception as err:
+                logger.warn(f"{cls.plugin_name}: MoviePilot MetaInfo 解析文件名失败 - {err}")
+
+        path_text = cls._clean_message_value(path)
+        if path_text:
+            try:
+                from pathlib import Path
+
+                path_meta = MetaInfoPath(Path(path_text))
+                if path_meta and cls._meta_title(path_meta):
+                    meta = path_meta if not meta else meta
+                if path_meta:
+                    file_metas.append(path_meta)
+            except Exception:
+                pass
+
+        if meta:
+            result.update(cls._moviepilot_meta_to_dict(meta))
+            if not result.get("title") or not result.get("year"):
+                recognized = cls._moviepilot_recognize(meta)
+                if recognized:
+                    result.update({key: value for key, value in recognized.items() if value})
+
+        local_release = cls._parse_release_name(title_text)
+        local_title = cls._strip_title_brackets(local_release.get("title_zh") or "") if local_release else ""
+        if local_title and cls._has_cjk(local_title):
+            result["title"] = local_title
+
+        title_episode = cls._extract_explicit_episode_text(title_text)
+        episode = title_episode or cls._moviepilot_episode_from_metas(file_metas) or cls._moviepilot_episode_from_meta(meta)
+        if episode:
+            result["episode"] = episode
+        if file_metas:
+            for key in ("quality", "audio", "group"):
+                if not result.get(key):
+                    for item in file_metas:
+                        value = cls._moviepilot_meta_to_dict(item).get(key)
+                        if value:
+                            result[key] = value
+                            break
+        return {key: value for key, value in result.items() if value}
+
+    @classmethod
+    def _select_episode(cls, title: Any, local_episode: Any = None, moviepilot_episode: Any = None) -> Optional[str]:
+        title_episode = cls._extract_explicit_episode_text(title)
+        if title_episode:
+            return title_episode
+        mp_episode = cls._format_episode_text(moviepilot_episode)
+        if mp_episode:
+            return mp_episode
+        local_text = cls._format_episode_text(local_episode)
+        if local_text:
+            return local_text
+        return cls._clean_message_value(local_episode) or cls._clean_message_value(moviepilot_episode)
+
+    @classmethod
+    def _best_media_title(cls, title: Any, *candidates: Any) -> Optional[str]:
+        release_info = cls._parse_release_name(title) or {}
+        values = [
+            cls._strip_title_brackets(release_info.get("title_zh") or ""),
+            *candidates,
+            release_info.get("title_en"),
+        ]
+        cleaned = [cls._clean_message_value(value) for value in values]
+        cleaned = [value for value in cleaned if value]
+        for value in cleaned:
+            if cls._has_cjk(value):
+                return value
+        return cleaned[0] if cleaned else None
+
+    @classmethod
+    def _compact_name_with_moviepilot(cls, title: Any, mp_info: Dict[str, str], episode: Any = None) -> Optional[str]:
+        release_info = cls._parse_release_name(title)
+        if release_info:
+            merged = dict(release_info)
+            mp_title = cls._clean_message_value((mp_info or {}).get("title"))
+            if mp_title:
+                if cls._has_cjk(mp_title):
+                    merged["title_zh"] = mp_title
+                elif not merged.get("title_zh"):
+                    merged["title_en"] = mp_title
+            if (mp_info or {}).get("year"):
+                merged["year"] = mp_info["year"]
+            if (mp_info or {}).get("quality") and not merged.get("resolution"):
+                merged["resolution"] = mp_info["quality"]
+            if (mp_info or {}).get("audio") and (
+                not merged.get("audio")
+                or re.match(r"^\d+\s*Audio$", str(merged.get("audio")), re.IGNORECASE)
+            ):
+                merged["audio"] = mp_info["audio"]
+            if (mp_info or {}).get("group") and not merged.get("group"):
+                merged["group"] = mp_info["group"]
+            formatted = cls._format_release_name_by_template(merged)
+            if formatted:
+                return formatted
+        return cls._compact_name(title, episode=episode) or cls._moviepilot_compact_name(mp_info)
+
+    @classmethod
+    def _moviepilot_meta_to_dict(cls, meta: Any) -> Dict[str, str]:
+        if not meta:
+            return {}
+        return {
+            "title": cls._meta_title(meta),
+            "year": cls._clean_message_value(getattr(meta, "year", None)),
+            "episode": cls._moviepilot_episode_from_meta(meta),
+            "quality": cls._clean_message_value(getattr(meta, "resource_pix", None)),
+            "audio": cls._clean_message_value(getattr(meta, "audio_term", None) or getattr(meta, "audio_encode", None)),
+            "group": cls._clean_message_value(getattr(meta, "release_group", None) or getattr(meta, "resource_team", None)),
+            "category": cls._moviepilot_category(getattr(meta, "type", None)),
+        }
+
+    @classmethod
+    def _moviepilot_recognize(cls, meta: Any) -> Dict[str, str]:
+        try:
+            from app.chain.media import MediaChain
+        except Exception:
+            return {}
+        try:
+            mediainfo = MediaChain().recognize_by_meta(meta, obtain_images=False)
+        except Exception as err:
+            logger.warn(f"{cls.plugin_name}: MoviePilot MediaChain 识别失败 - {err}")
+            return {}
+        if not mediainfo:
+            return {}
+        media_data = cls._to_dict(mediainfo)
+        return {
+            "title": cls._first_value(media_data, "title", "title_year") or cls._clean_message_value(getattr(mediainfo, "title", None)),
+            "year": cls._first_value(media_data, "year") or cls._clean_message_value(getattr(mediainfo, "year", None)),
+            "category": cls._format_category(cls._first_value(media_data, "type")),
+        }
+
+    @classmethod
+    def _moviepilot_episode_from_metas(cls, metas: List[Any]) -> Optional[str]:
+        pairs = []
+        season = None
+        for meta in metas or []:
+            item_season = cls._to_positive_int(getattr(meta, "begin_season", None))
+            begin_episode = cls._to_positive_int(getattr(meta, "begin_episode", None))
+            end_episode = cls._to_positive_int(getattr(meta, "end_episode", None))
+            season = season or item_season
+            if begin_episode and end_episode and end_episode >= begin_episode:
+                pairs.extend((item_season, episode) for episode in range(begin_episode, end_episode + 1))
+            elif begin_episode:
+                pairs.append((item_season, begin_episode))
+        if pairs:
+            return cls._format_episode_pairs(pairs, season)
+        return None
+
+    @classmethod
+    def _moviepilot_episode_from_meta(cls, meta: Any) -> Optional[str]:
+        if not meta:
+            return None
+        season = cls._to_positive_int(getattr(meta, "begin_season", None))
+        begin_episode = cls._to_positive_int(getattr(meta, "begin_episode", None))
+        end_episode = cls._to_positive_int(getattr(meta, "end_episode", None))
+        if begin_episode and end_episode and end_episode >= begin_episode:
+            if season:
+                return f"S{season:02d}E{begin_episode:02d}-E{end_episode:02d}"
+            return f"E{begin_episode:02d}-E{end_episode:02d}"
+        if begin_episode:
+            if season:
+                return f"S{season:02d}E{begin_episode:02d}"
+            return f"E{begin_episode:02d}"
+        season_episode = cls._clean_message_value(getattr(meta, "season_episode", None))
+        if season_episode:
+            return season_episode.replace(" ", "").upper()
+        return None
+
+    @classmethod
+    def _moviepilot_compact_name(cls, info: Dict[str, str]) -> Optional[str]:
+        if not info or not info.get("title"):
+            return None
+        parts = [
+            info.get("title"),
+            info.get("quality"),
+            info.get("audio"),
+            info.get("group"),
+        ]
+        return " | ".join(str(part).strip() for part in parts if part)
+
+    @classmethod
+    def _meta_title(cls, meta: Any) -> Optional[str]:
+        if not meta:
+            return None
+        for attr in ("name", "cn_name", "en_name", "original_name"):
+            try:
+                value = getattr(meta, attr, None)
+            except Exception:
+                value = None
+            text = cls._clean_message_value(value)
+            if text:
+                return text
+        return None
+
+    @classmethod
+    def _moviepilot_category(cls, media_type: Any) -> Optional[str]:
+        text = cls._clean_message_value(getattr(media_type, "value", media_type))
+        if not text:
+            return None
+        if text.lower() in ("unknown", "mediatype.unknown", "未知"):
+            return None
+        if text.lower() in ("movie", "movies"):
+            return "电影"
+        if text.lower() in ("tv", "series", "电视剧"):
+            return "剧集"
+        return text
 
     def _add_qb_tag(self, torrent_hash: Optional[str]):
         if not self._qb_auto_tag_enabled:
@@ -1992,7 +2234,15 @@ class DownloadAddedNotify(_PluginBase):
         if release_tag:
             return release_tag
         audio = info.get("audio")
+        codec = info.get("codec")
         group = info.get("group")
+        if codec and group and "@" in str(group):
+            group_prefix = str(group).split("@", 1)[0]
+            if (
+                re.match(r"^(H\.?26[45]|x26[45])$", str(codec), re.IGNORECASE)
+                and re.match(r"^[A-Za-z0-9]+$", group_prefix)
+            ):
+                return f"{codec}-{group_prefix}"
         if (
             audio
             and group
