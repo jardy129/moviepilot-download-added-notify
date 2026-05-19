@@ -51,7 +51,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.3.0"
+    plugin_version = "0.3.1"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -231,14 +231,15 @@ class DownloadAddedNotify(_PluginBase):
         media_title = self._media_title(media_info, meta_info)
         year = self._first_value(media_data, "year") or self._first_value(meta_data, "year")
         torrent_hash = self._first_value(torrent_data, "hash", "info_hash") or self._first_value(data, "hash", "info_hash")
-        episode = self._extract_episode_summary(
+        file_names = self._qb_torrent_file_names_if_needed(torrent_hash, title, save_path)
+        episode = self._resolve_episode(
             title,
+            file_names,
+            self._extract_episode_from_download_path(save_path),
             torrent_data,
             meta_data,
             media_data,
             data,
-            self._qb_torrent_file_names_if_needed(torrent_hash, title, save_path),
-            self._extract_episode_from_download_path(save_path),
         )
 
         media_text = media_title
@@ -311,11 +312,12 @@ class DownloadAddedNotify(_PluginBase):
             self._first_value(self._to_dict(transfer_data.get("target_item")), "path", "name")
             or self._first_value(transfer_data, "target_path", "target_dir", "file_path")
         )
-        episode = self._extract_episode_summary(
+        episode = self._resolve_episode(
             title,
-            data,
+            None,
             self._extract_episode_from_download_path(source_path),
             self._extract_episode_from_download_path(target_path),
+            data,
         )
 
         lines = self._message_lines(
@@ -423,12 +425,13 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(torrent_data, "total_size", "size"))
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
-        episode = self._extract_episode_summary(
+        file_names = self._qb_torrent_file_names_if_needed(torrent_hash, title, content_path, save_path)
+        episode = self._resolve_episode(
             title,
-            torrent_data,
-            self._qb_torrent_file_names_if_needed(torrent_hash, title, content_path, save_path),
+            file_names,
             self._extract_episode_from_download_path(content_path),
             self._extract_episode_from_download_path(save_path),
+            torrent_data,
         )
         display_title = self._display_title(
             title,
@@ -503,12 +506,13 @@ class DownloadAddedNotify(_PluginBase):
         quality = self._first_value(payload, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
         torrent_hash = self._first_value(payload, "hash", "info_hash")
-        episode = self._extract_episode_summary(
+        file_names = self._qb_torrent_file_names_if_needed(torrent_hash, title, content_path, save_path)
+        episode = self._resolve_episode(
             title,
-            payload,
-            self._qb_torrent_file_names_if_needed(torrent_hash, title, content_path, save_path),
+            file_names,
             self._extract_episode_from_download_path(content_path),
             self._extract_episode_from_download_path(save_path),
+            payload,
         )
 
         event_name = "下载完成" if event in ("completed", "finished", "done") else "下载已添加"
@@ -1586,6 +1590,53 @@ class DownloadAddedNotify(_PluginBase):
         if not episode_pairs:
             return cls._extract_episode(*values)
         return cls._format_episode_pairs(episode_pairs, season_hint)
+
+    @classmethod
+    def _extract_episode_candidate(cls, value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        if isinstance(value, (list, tuple, set)):
+            pairs = cls._collect_episode_pairs(value)
+            if pairs:
+                return cls._format_episode_pairs(pairs)
+            return None
+        if isinstance(value, dict):
+            for item in cls._trusted_episode_values(value):
+                candidate = cls._extract_episode_candidate(item)
+                if candidate:
+                    return candidate
+            return None
+        return cls._extract_episode_from_value(value)
+
+    @classmethod
+    def _resolve_episode(cls, title: Any, file_names: Any = None, *other_sources: Any) -> Optional[str]:
+        explicit_title = cls._extract_explicit_episode_text(title)
+        if explicit_title:
+            return explicit_title
+
+        file_candidate = cls._extract_episode_candidate(file_names)
+        if file_candidate:
+            return file_candidate
+
+        for source in other_sources:
+            if isinstance(source, str):
+                source_text = source.replace("\\", "/").rstrip("/")
+                ext = os.path.splitext(os.path.basename(source_text))[1].lower()
+                if ext in cls._video_extensions:
+                    candidate = cls._extract_episode_candidate(source)
+                    if candidate:
+                        return candidate
+
+        for source in other_sources:
+            explicit = cls._extract_explicit_episode_text(source)
+            if explicit:
+                return explicit
+
+        for source in other_sources:
+            candidate = cls._extract_episode_candidate(source)
+            if candidate:
+                return candidate
+        return None
 
     @classmethod
     def _format_episode_pairs(cls, episode_pairs: List[tuple], season_hint: Optional[int] = None) -> Optional[str]:
