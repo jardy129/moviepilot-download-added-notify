@@ -18,7 +18,7 @@
 - 本地仓库：`/Users/jardy/Documents/Codex/2026-05-16/moviepilot-qb/moviepilot-download-added-notify`
 - GitHub：`git@github.com:jardy129/moviepilot-download-added-notify.git`
 - 主分支：`main`
-- 当前最新版本：`0.3.8`
+- 当前最新版本：`0.3.9`
 - 最新提交：以 `git log -1 --oneline` 为准
 
 主要文件：
@@ -60,7 +60,7 @@ MoviePilot 日志里看到，qB 传给插件的 `%N` 经常不是完整种子名
 3. `content_path` 或 `save_path` 中的文件名/目录名。
 4. qB 传入的短任务名。
 
-## 当前 0.3.8 的关键逻辑
+## 当前 0.3.9 的关键逻辑
 
 新增/调整的关键方法：
 
@@ -88,6 +88,7 @@ MoviePilot 日志里看到，qB 传给插件的 `%N` 经常不是完整种子名
 - 文件列表中如果是原盘结构，忽略 `00000.m2ts` 这种无意义文件名，取上层发布目录名。
 - 解析标题优先用完整文件名，但展示标题继续优先中文短名。
 - 标题里已经明确有 `S01E07-E09` 时，严格以标题为准，不能被其他文件里的 `E10` 污染。
+- MoviePilot 自动下载下发到 qB 后，如果 qB 任务带 `MOVIEPILOT` 标签，或 hash 命中刚刚记录的 MoviePilot 下载事件，qB 新任务通知静默，只保留 MoviePilot 下载添加通知。
 - 标题只有 `S01` 时，才从 qB 文件列表补 `E01`、`E01-E03` 等集数。
 
 ## 现场验证过的样例

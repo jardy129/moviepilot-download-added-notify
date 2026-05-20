@@ -2,13 +2,14 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
-    "version": "0.3.8",
+    "version": "0.3.9",
     "icon": "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png",
     "author": "jardy",
     "author_url": "https://github.com/jardy129/",
     "level": 0,
     "v2": true,
         "history": {
+      "v0.3.9": "MoviePilot 自动下载任务触发 qB 通知时自动静默，只保留 MoviePilot 下载添加通知",
       "v0.3.8": "季包拿不到 qB 文件列表时同时跳过 content_path 标题解析和 MetaInfoPath，并保护原始发布名集数不被路径覆盖",
       "v0.3.7": "季包拿不到 qB 文件列表时不再使用 content_path 单集兜底，避免误报 S01E07",
       "v0.3.6": "增加短片名识别别名和 qB 任务名反查文件列表兜底，补全年份与季包集数区间",

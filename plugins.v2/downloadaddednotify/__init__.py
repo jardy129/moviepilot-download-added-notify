@@ -52,7 +52,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.3.8"
+    plugin_version = "0.3.9"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -69,6 +69,9 @@ class DownloadAddedNotify(_PluginBase):
     _qb_poll_enabled = True
     _qb_poll_interval = 15
     _qb_seen_hashes_key = "qb_seen_hashes"
+    _mp_recent_downloads_key = "mp_recent_downloads"
+    _mp_recent_download_ttl = 600
+    _suppress_moviepilot_qb_notify = True
     _external_notify_enabled = True
     _external_notify_token = ""
     _moviepilot_base_url = "http://moviepilot:3001"
@@ -133,6 +136,7 @@ class DownloadAddedNotify(_PluginBase):
         self._only_downloader = (config.get("only_downloader") or "").strip()
         self._include_raw_summary = bool(config.get("include_raw_summary"))
         self._qb_poll_enabled = bool(config.get("qb_poll_enabled", True))
+        self._suppress_moviepilot_qb_notify = bool(config.get("suppress_moviepilot_qb_notify", True))
         if str(config.get("qb_poll_interval", "")).strip() == "60":
             config["qb_poll_interval"] = 15
         self._qb_poll_interval = self._safe_int(config.get("qb_poll_interval"), 15, 5)
@@ -178,6 +182,7 @@ class DownloadAddedNotify(_PluginBase):
             or config.get("qb_completed_command") != saved_config.get("qb_completed_command")
             or "qb_auto_tag_enabled" not in saved_config
             or "qb_tag_name" not in saved_config
+            or "suppress_moviepilot_qb_notify" not in saved_config
             or "release_name_template" not in saved_config
         ):
             self.update_config(config)
@@ -275,6 +280,7 @@ class DownloadAddedNotify(_PluginBase):
                     continue
                 lines.append(f"- {key}: {value}")
 
+        self._remember_moviepilot_download(title, torrent_hash)
         try:
             self._post_notification(
                 title=display_title,
@@ -432,6 +438,10 @@ class DownloadAddedNotify(_PluginBase):
         size = self._format_size_gb(self._first_raw_value(torrent_data, "total_size", "size"))
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
+        if self._should_skip_qb_notification(title, torrent_hash, tags):
+            self._add_qb_tag(torrent_hash)
+            logger.info(f"{self.plugin_name}: 已跳过 MoviePilot 自动下载对应的 Qbittorrent 新任务通知 - {title}")
+            return
         file_names = self._qb_torrent_file_names_for_parse(torrent_hash, title, content_path, save_path)
         parse_path = self._trusted_parse_path(title, file_names, content_path, save_path)
         parse_title = self._best_parse_title(title, file_names=file_names, path=parse_path)
@@ -515,6 +525,10 @@ class DownloadAddedNotify(_PluginBase):
         quality = self._first_value(payload, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
         torrent_hash = self._first_value(payload, "hash", "info_hash")
+        if event not in ("completed", "finished", "done") and self._should_skip_qb_notification(title, torrent_hash, tags):
+            self._add_qb_tag(torrent_hash)
+            logger.info(f"{self.plugin_name}: 已跳过 MoviePilot 自动下载对应的 Qbittorrent 外部通知 - {title}")
+            return {"success": True, "skipped": True}
         file_names = self._qb_torrent_file_names_for_parse(torrent_hash, title, content_path, save_path)
         parse_path = self._trusted_parse_path(title, file_names, content_path, save_path)
         parse_title = self._best_parse_title(title, file_names=file_names, path=parse_path)
@@ -922,6 +936,7 @@ class DownloadAddedNotify(_PluginBase):
             "only_downloader": "",
             "include_raw_summary": False,
             "qb_poll_enabled": True,
+            "suppress_moviepilot_qb_notify": True,
             "qb_poll_interval": 15,
             "external_notify_enabled": True,
             "external_notify_token": "",
@@ -1148,6 +1163,91 @@ class DownloadAddedNotify(_PluginBase):
             except TypeError:
                 kwargs.pop("mtype", None)
                 self.post_message(**kwargs)
+
+    def _remember_moviepilot_download(self, title: Any, torrent_hash: Any = None):
+        if not self._suppress_moviepilot_qb_notify:
+            return
+        now = time.time()
+        records = self._recent_moviepilot_downloads(now)
+        records.append({
+            "hash": self._normalize_hash(torrent_hash),
+            "title": self._normalize_task_title(title),
+            "time": now,
+        })
+        self.save_data(self._mp_recent_downloads_key, records[-100:])
+
+    def _should_skip_qb_notification(self, title: Any, torrent_hash: Any = None, tags: Any = None) -> bool:
+        if not self._suppress_moviepilot_qb_notify:
+            return False
+        if self._has_moviepilot_tag(tags):
+            return True
+        current_hash = self._normalize_hash(torrent_hash)
+        current_title = self._normalize_task_title(title)
+        if not current_hash and not current_title:
+            return False
+        for item in self._recent_moviepilot_downloads():
+            item_hash = self._normalize_hash(item.get("hash"))
+            if current_hash and item_hash and current_hash == item_hash:
+                return True
+            item_title = self._normalize_task_title(item.get("title"))
+            if current_title and item_title and current_title == item_title:
+                return True
+        return False
+
+    def _recent_moviepilot_downloads(self, now: Optional[float] = None) -> List[Dict[str, Any]]:
+        now = now or time.time()
+        records = self.get_data(self._mp_recent_downloads_key) or []
+        if not isinstance(records, list):
+            return []
+        fresh = []
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            timestamp = self._safe_float(item.get("time"), 0)
+            if timestamp and now - timestamp <= self._mp_recent_download_ttl:
+                fresh.append(item)
+        if len(fresh) != len(records):
+            self.save_data(self._mp_recent_downloads_key, fresh)
+        return fresh
+
+    def _has_moviepilot_tag(self, tags: Any) -> bool:
+        tag_name = (self._qb_tag_name or "MOVIEPILOT").strip().lower()
+        for tag in self._split_tags(tags):
+            tag_text = tag.lower()
+            if tag_text == "moviepilot" or (tag_name and tag_text == tag_name):
+                return True
+        return False
+
+    @classmethod
+    def _split_tags(cls, tags: Any) -> List[str]:
+        if tags in (None, ""):
+            return []
+        if isinstance(tags, dict):
+            values = []
+            for value in tags.values():
+                values.extend(cls._split_tags(value))
+            return values
+        if isinstance(tags, (list, tuple, set)):
+            values = []
+            for value in tags:
+                values.extend(cls._split_tags(value))
+            return values
+        text = cls._clean_message_value(tags) or ""
+        return [item.strip() for item in re.split(r"[,，;；]", text) if item.strip()]
+
+    @staticmethod
+    def _normalize_hash(value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        return str(value).strip().lower() or None
+
+    @classmethod
+    def _normalize_task_title(cls, value: Any) -> Optional[str]:
+        text = cls._clean_message_value(value)
+        if not text:
+            return None
+        text = re.sub(r"[^\w\u4e00-\u9fff]+", "", text, flags=re.IGNORECASE)
+        return text.lower() or None
 
     @classmethod
     def _best_parse_title(cls, title: Any, file_names: Any = None, path: Any = None) -> str:
@@ -2936,6 +3036,13 @@ class DownloadAddedNotify(_PluginBase):
         except (TypeError, ValueError):
             return default
         return max(number, minimum)
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
     @staticmethod
     async def _request_payload(request: Request) -> Dict[str, Any]:
