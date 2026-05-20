@@ -52,7 +52,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.3.7"
+    plugin_version = "0.3.8"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -433,8 +433,9 @@ class DownloadAddedNotify(_PluginBase):
         quality = self._first_value(torrent_data, "quality", "resolution") or self._extract_quality(title)
         seeders = self._format_seed_count(self._first_raw_value(torrent_data, "num_seeds", "seeders", "seeds"))
         file_names = self._qb_torrent_file_names_for_parse(torrent_hash, title, content_path, save_path)
-        parse_title = self._best_parse_title(title, file_names=file_names, path=content_path or save_path)
-        mp_info = self._moviepilot_parse(parse_title, file_names=file_names, path=content_path or save_path, original_title=title)
+        parse_path = self._trusted_parse_path(title, file_names, content_path, save_path)
+        parse_title = self._best_parse_title(title, file_names=file_names, path=parse_path)
+        mp_info = self._moviepilot_parse(parse_title, file_names=file_names, path=parse_path, original_title=title)
         episode = self._resolve_episode(
             parse_title,
             file_names,
@@ -515,8 +516,9 @@ class DownloadAddedNotify(_PluginBase):
         seeders = self._format_seed_count(self._first_raw_value(payload, "num_seeds", "seeders", "seeds"))
         torrent_hash = self._first_value(payload, "hash", "info_hash")
         file_names = self._qb_torrent_file_names_for_parse(torrent_hash, title, content_path, save_path)
-        parse_title = self._best_parse_title(title, file_names=file_names, path=content_path or save_path)
-        mp_info = self._moviepilot_parse(parse_title, file_names=file_names, path=content_path or save_path, original_title=title)
+        parse_path = self._trusted_parse_path(title, file_names, content_path, save_path)
+        parse_title = self._best_parse_title(title, file_names=file_names, path=parse_path)
+        mp_info = self._moviepilot_parse(parse_title, file_names=file_names, path=parse_path, original_title=title)
         episode = self._resolve_episode(
             parse_title,
             file_names,
@@ -1149,6 +1151,10 @@ class DownloadAddedNotify(_PluginBase):
 
     @classmethod
     def _best_parse_title(cls, title: Any, file_names: Any = None, path: Any = None) -> str:
+        title_text = cls._clean_message_value(title)
+        if title_text and cls._keep_original_parse_title(title_text):
+            return title_text
+
         candidates = []
         for file_name in cls._trusted_episode_values(file_names):
             candidates.append(cls._path_parse_title(file_name) or file_name)
@@ -1168,6 +1174,19 @@ class DownloadAddedNotify(_PluginBase):
                 best = text
                 best_score = score
         return best or cls._clean_message_value(title) or "未知任务"
+
+    @classmethod
+    def _keep_original_parse_title(cls, title: Any) -> bool:
+        info = cls._parse_release_name(title) or {}
+        if not info:
+            return False
+        if cls._extract_explicit_episode_text(title):
+            return True
+        if info.get("season") and info.get("episode"):
+            return True
+        if info.get("season") and not info.get("episode"):
+            return bool(info.get("year") and info.get("resolution"))
+        return bool(info.get("year") and info.get("resolution"))
 
     @classmethod
     def _path_parse_title(cls, path: Any) -> Optional[str]:
@@ -1634,6 +1653,13 @@ class DownloadAddedNotify(_PluginBase):
             logger.info(f"{cls.plugin_name}: 季包未取得 qB 文件列表，跳过 content_path 单集集数兜底")
             return None
         return cls._extract_episode_from_download_path(path)
+
+    @classmethod
+    def _trusted_parse_path(cls, title: Any, file_names: Any, content_path: Any = None, save_path: Any = None) -> Optional[str]:
+        if cls._season_only_release(title) and not cls._trusted_episode_values(file_names):
+            logger.info(f"{cls.plugin_name}: 季包未取得 qB 文件列表，跳过 content_path 标题解析")
+            return cls._clean_message_value(save_path)
+        return cls._clean_message_value(content_path) or cls._clean_message_value(save_path)
 
     @classmethod
     def _season_only_release(cls, title: Any) -> bool:
