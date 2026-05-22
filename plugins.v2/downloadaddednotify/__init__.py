@@ -52,7 +52,7 @@ class DownloadAddedNotify(_PluginBase):
     plugin_name = "下载添加通知"
     plugin_desc = "监听下载添加事件，并通过 MoviePilot 系统通知发送消息"
     plugin_icon = "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png"
-    plugin_version = "0.3.9"
+    plugin_version = "0.3.10"
     plugin_author = "jardy"
     author_url = "https://github.com/jardy129/"
     plugin_config_prefix = "downloadaddednotify_"
@@ -71,6 +71,7 @@ class DownloadAddedNotify(_PluginBase):
     _qb_seen_hashes_key = "qb_seen_hashes"
     _mp_recent_downloads_key = "mp_recent_downloads"
     _mp_recent_download_ttl = 600
+    _suppress_moviepilot_download_added_notify = True
     _suppress_moviepilot_qb_notify = True
     _external_notify_enabled = True
     _external_notify_token = ""
@@ -136,6 +137,9 @@ class DownloadAddedNotify(_PluginBase):
         self._only_downloader = (config.get("only_downloader") or "").strip()
         self._include_raw_summary = bool(config.get("include_raw_summary"))
         self._qb_poll_enabled = bool(config.get("qb_poll_enabled", True))
+        self._suppress_moviepilot_download_added_notify = bool(
+            config.get("suppress_moviepilot_download_added_notify", True)
+        )
         self._suppress_moviepilot_qb_notify = bool(config.get("suppress_moviepilot_qb_notify", True))
         if str(config.get("qb_poll_interval", "")).strip() == "60":
             config["qb_poll_interval"] = 15
@@ -182,6 +186,7 @@ class DownloadAddedNotify(_PluginBase):
             or config.get("qb_completed_command") != saved_config.get("qb_completed_command")
             or "qb_auto_tag_enabled" not in saved_config
             or "qb_tag_name" not in saved_config
+            or "suppress_moviepilot_download_added_notify" not in saved_config
             or "suppress_moviepilot_qb_notify" not in saved_config
             or "release_name_template" not in saved_config
         ):
@@ -237,6 +242,10 @@ class DownloadAddedNotify(_PluginBase):
         media_title = self._media_title(media_info, meta_info)
         year = self._first_value(media_data, "year") or self._first_value(meta_data, "year")
         torrent_hash = self._first_value(torrent_data, "hash", "info_hash") or self._first_value(data, "hash", "info_hash")
+        if self._should_skip_moviepilot_download_added(data, context, torrent_data, media_data, meta_data):
+            self._remember_moviepilot_download(title, torrent_hash)
+            logger.info(f"{self.plugin_name}: 已跳过 MoviePilot 原生自动下载通知对应的插件重复通知 - {title}")
+            return
         file_names = self._qb_torrent_file_names_if_needed(torrent_hash, title, save_path)
         mp_info = self._moviepilot_parse(title, file_names=file_names, path=save_path)
         episode = self._resolve_episode(
@@ -936,6 +945,7 @@ class DownloadAddedNotify(_PluginBase):
             "only_downloader": "",
             "include_raw_summary": False,
             "qb_poll_enabled": True,
+            "suppress_moviepilot_download_added_notify": True,
             "suppress_moviepilot_qb_notify": True,
             "qb_poll_interval": 15,
             "external_notify_enabled": True,
@@ -1163,6 +1173,26 @@ class DownloadAddedNotify(_PluginBase):
             except TypeError:
                 kwargs.pop("mtype", None)
                 self.post_message(**kwargs)
+
+    def _should_skip_moviepilot_download_added(
+        self,
+        data: Dict[str, Any],
+        context: Any = None,
+        torrent_data: Optional[Dict[str, Any]] = None,
+        media_data: Optional[Dict[str, Any]] = None,
+        meta_data: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        if not self._suppress_moviepilot_download_added_notify:
+            return False
+        if context:
+            return True
+        if torrent_data and any(torrent_data.get(key) not in (None, "") for key in ("site", "site_name", "title")):
+            return True
+        if media_data and any(media_data.get(key) not in (None, "") for key in ("title", "name", "year")):
+            return True
+        if meta_data and any(meta_data.get(key) not in (None, "") for key in ("title", "name", "year")):
+            return True
+        return any(data.get(key) not in (None, "") for key in ("site", "site_name", "media_info", "torrent_info"))
 
     def _remember_moviepilot_download(self, title: Any, torrent_hash: Any = None):
         if not self._suppress_moviepilot_qb_notify:
