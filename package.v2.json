@@ -2,14 +2,15 @@
   "DownloadAddedNotify": {
     "name": "下载添加通知",
     "description": "监听 MoviePilot 下载添加事件，并通过系统通知渠道发送通知",
+    "labels": "消息通知,下载器,qBittorrent,稳定版",
     "version": "0.3.10",
     "icon": "https://raw.githubusercontent.com/jardy129/moviepilot-download-added-notify/main/icons/qbittorrent.png",
     "author": "jardy",
     "author_url": "https://github.com/jardy129/",
     "level": 0,
     "v2": true,
-        "history": {
-      "v0.3.10": "MoviePilot 原生自动下载已通知时跳过插件 DownloadAdded 重复通知，同时继续记录任务用于拦截 qB 侧重复",
+    "history": {
+      "v0.3.10": "稳定版：MoviePilot 原生自动下载已通知时跳过插件 DownloadAdded 重复通知，同时继续记录任务用于拦截 qB 侧重复",
       "v0.3.9": "MoviePilot 自动下载任务触发 qB 通知时自动静默，只保留 MoviePilot 下载添加通知",
       "v0.3.8": "季包拿不到 qB 文件列表时同时跳过 content_path 标题解析和 MetaInfoPath，并保护原始发布名集数不被路径覆盖",
       "v0.3.7": "季包拿不到 qB 文件列表时不再使用 content_path 单集兜底，避免误报 S01E07",
@@ -19,11 +20,7 @@
       "v0.3.3": "优先复用 MoviePilot MetaInfo 和 MediaChain 解析结果，失败时再使用本地解析兜底",
       "v0.3.2": "优化电影种子命名解析，支持年份后版本标记并清洗中英混排标题",
       "v0.3.1": "按来源优先级重构通知集数决策链：标题优先、qB 文件名第二、其他字段最后",
-      "v0.3.0": "重构集数提取链路，仅信任标题文本字段与视频文件名，移除不可靠数值字段和路径递归干扰",
-            "v0.2.8": "彻底忽略目录路径中的集数干扰，content_path 和 save_path 仅在视频文件场景提取集数",
-            "v0.2.7": "修正多文件种子目录名误混入集数，qB 文件集数仅按视频文件名识别",
-            "v0.2.6": "修正方括号中文加英文电影标题解析，标题和名称优先显示中文片名",
-            "v0.2.5": "多文件集数存在连续主段和孤立误判集数时优先显示连续主段"
-        }
+      "v0.3.0": "重构集数提取链路，仅信任标题文本字段与视频文件名，移除不可靠数值字段和路径递归干扰"
+    }
     }
 }
